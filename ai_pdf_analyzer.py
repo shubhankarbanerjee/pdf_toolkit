@@ -396,31 +396,71 @@ Keep the summary concise and well-structured.
             }
     
     def _analyze_with_ollama(self, prompt: str, context: str) -> Dict[str, Any]:
-        """Analyze using local Ollama."""
+        """Analyze using local Ollama or Msty (OpenAI-compatible mode)."""
+        host = self.config['ollama']['host'].rstrip('/')
+        model = self.config['ollama']['model']
+        
         try:
+            # Try native Ollama endpoint first
+            try:
+                response = requests.post(
+                    f"{host}/api/generate",
+                    json={
+                        "model": model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "temperature": 0.7
+                    },
+                    timeout=120
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    return {
+                        'success': True,
+                        'provider': 'ollama',
+                        'summary': result.get('response', ''),
+                        'timestamp': datetime.now().isoformat()
+                    }
+                elif response.status_code == 404:
+                    # Endpoint not found - try Msty OpenAI-compatible endpoint
+                    pass
+                else:
+                    return {
+                        'success': False,
+                        'error': f'Ollama error: HTTP {response.status_code}'
+                    }
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+                pass  # Try fallback endpoint
+            
+            # Fallback to Msty's OpenAI-compatible endpoint
             response = requests.post(
-                f"{self.config['ollama']['host'].rstrip('/')}/api/generate",
+                f"{host}/v1/chat/completions",
                 json={
-                    "model": self.config['ollama']['model'],
-                    "prompt": prompt,
-                    "stream": False,
-                    "temperature": 0.7
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": "You are a document analysis expert."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 1500
                 },
                 timeout=120
             )
             
             if response.status_code == 200:
                 result = response.json()
+                message_content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
                 return {
                     'success': True,
-                    'provider': 'ollama',
-                    'summary': result.get('response', ''),
+                    'provider': 'ollama (Msty)',
+                    'summary': message_content,
                     'timestamp': datetime.now().isoformat()
                 }
             else:
                 return {
                     'success': False,
-                    'error': f'Ollama error: {response.status_code}'
+                    'error': f'Msty error: HTTP {response.status_code} - check model name and endpoint availability'
                 }
         except Exception as e:
             return {

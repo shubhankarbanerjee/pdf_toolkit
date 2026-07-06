@@ -10,7 +10,7 @@
   },
   "ollama": {
     "host": "http://192.168.1.15:11964",
-    "model": "llama2",
+    "model": "llama3.2-vision:latest",
     "enabled": true
   }
 }
