@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Toolkit - All-in-One PDF Processor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --secondary: #64748b;
+            --success: #22c55e;
+            --error: #ef4444;
+            --warning: #f59e0b;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --text: #1e293b;
+            --text-light: #64748b;
+            --border: #e2e8f0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            padding: 2rem 1rem;
+            text-align: center;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            font-size: 1rem;
+            opacity: 0.9;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        /* Main Container */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+
+        /* Tool Grid */
+        .tool-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        /* Tool Card */
+        .tool-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border: 1px solid var(--border);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .tool-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .tool-card h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--primary);
+        }
+
+        .tool-card .description {
+            color: var(--text-light);
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+        }
+
+        /* File Input Styling */
+        .file-input-wrapper {
+            position: relative;
+            margin-bottom: 1rem;
+        }
+
+        .file-input-wrapper input[type="file"] {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .file-input-label {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 1rem;
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            background: var(--bg);
+            color: var(--text-light);
+            font-size: 0.875rem;
+            transition: border-color 0.2s, background 0.2s;
+        }
+
+        .file-input-wrapper:hover .file-input-label {
+            border-color: var(--primary);
+            background: #eff6ff;
+        }
+
+        .file-input-label svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        .file-name {
+            font-size: 0.75rem;
+            color: var(--success);
+            margin-top: 0.5rem;
+            word-break: break-all;
+        }
+
+        /* Options */
+        .options {
+            margin: 1rem 0;
+        }
+
+        .option-group {
+            margin-bottom: 0.75rem;
+        }
+
+        .option-group label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+        }
+
+        .option-group input,
+        .option-group select {
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.875rem;
+            background: var(--card-bg);
+        }
+
+        .option-group input:focus,
+        .option-group select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-primary:disabled {
+            background: var(--secondary);
+            cursor: not-allowed;
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-download {
+            background: var(--success);
+            color: white;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .btn-download:hover {
+            background: #16a34a;
+        }
+
+        /* Progress */
+        .progress-container {
+            margin-top: 1rem;
+            display: none;
+        }
+
+        .progress-bar {
+            height: 4px;
+            background: var(--border);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--primary);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .progress-text {
+            font-size: 0.75rem;
+            color: var(--text-light);
+            margin-top: 0.5rem;
+            text-align: center;
+        }
+
+        /* Status Messages */
+        .status {
+            margin-top: 1rem;
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            display: none;
+        }
+
+        .status.success {
+            background: #f0fdf4;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+
+        .status.error {
+            background: #fef2f2;
+            color: #991b1b;
+            border: 1px solid #fecaca;
+        }
+
+        .status.info {
+            background: #eff6ff;
+            color: #1e40af;
+            border: 1px solid #bfdbfe;
+        }
+
+        /* Result Files */
+        .result-files {
+            margin-top: 1rem;
+        }
+
+        .result-file {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem 0.75rem;
+            background: var(--bg);
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        .result-file-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            margin-right: 1rem;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 2rem 1rem;
+            color: var(--text-light);
+            font-size: 0.875rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            .header h1 {
+                font-size: 1.5rem;
+            }
+
+            .tool-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .container {
+                padding: 1rem 0.75rem;
+            }
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid transparent;
+            border-top-color: currentColor;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Hidden class */
+        .hidden {
+            display: none !important;
+        }
+
+        /* File list for multiple files */
+        .file-list {
+            margin-top: 0.5rem;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0.5rem;
+            background: var(--bg);
+            border-radius: 4px;
+            margin-bottom: 0.25rem;
+            font-size: 0.75rem;
+        }
+
+        .file-item .remove-file {
+            cursor: pointer;
+            color: var(--error);
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>📄 PDF Toolkit</h1>
+        <p>All-in-one PDF processor. Works on any device - Android, iPhone, Windows, Mac.</p>
+    </header>
+
+    <main class="container">
+        <div class="tool-grid">
+            <!-- Merge PDFs -->
+            <div class="tool-card" id="merge-tool">
+                <h3>🔗 Merge PDFs</h3>
+                <p class="description">Combine two PDF files into one document.</p>
+                
+                <div class="file-input-wrapper">
+                    <div class="file-input-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        <span>Select First PDF</span>
+                    </div>
+                    <input type="file" accept=".pdf" id="merge-file1" onchange="updateFileName('merge-file1', 'merge-file1-name')">
+                </div>
+                <div class="file-name" id="merge-file1-name"></div>
+                
+                <div class="file-input-wrapper" style="margin-top: 0.75rem;">
+                    <div class="file-input-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        <span>Select Second PDF</span>
+                    </div>
+                    <input type="file" accept=".pdf" id="merge-file2" onchange="updateFileName('merge-file2', 'merge-file2-name')">
+                </div>
+                <div class="file-name" id="merge-file2-name"></div>
+                
+                <button class="btn btn-primary" onclick="mergePDFs()" id="merge-btn">
+                    <span class="btn-text">Merge PDFs</span>
+                </button>
+                
+                <div class="progress-container" id="merge-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <p class="progress-text">Processing...</p>
+                </div>
+                
+                <div class="status" id="merge-status"></div>
+                <div class="result-files" id="merge-result"></div>
+            </div>
+
+            <!-- Split PDF -->
+            <div class="tool-card" id="split-tool">
+                <h3>✂️ Split PDF</h3>
+                <p class="description">Split large PDF into smaller files by size.</p>
+                
+                <div class="file-input-wrapper">
+                    <div class="file-input-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        <span>Select PDF to Split</span>
+                    </div>
+                    <input type="file" accept=".pdf" id="split-file" onchange="updateFileName('split-file', 'split-file-name')">
+                </div>
+                <div class="file-name" id="split-file-name"></div>
+                
+                <div class="options">
+                    <div class="option-group">
+                        <label for="split-size">Max Size per Part (MB)</label>
+                        <input type="number" id="split-size" value="200" min="1" max="500">
+                    </div>
+                </div>
+                
+                <button class="btn btn-primary" onclick="splitPDF()" id="split-btn">
+                    <span class="btn-text">Split PDF</span>
+                </button>
+                
+                <div class="progress-container" id="split-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <p class="progress-text">Processing...</p>
+                </div>
+                
+                <div class="status" id="split-status"></div>
+                <div class="result-files" id="split-result"></div>
+            </div>
+
+            <!-- OCR PDF -->
+            <div class="tool-card" id="ocr-tool">
+                <h3>🔍 OCR PDF</h3>
+                <p class="description">Make scanned PDFs searchable with OCR text layer.</p>
+                
+                <div class="file-input-wrapper">
+                    <div class="file-input-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        <span>Select PDF for OCR</span>
+                    </div>
+                    <input type="file" accept=".pdf" id="ocr-file" onchange="updateFileName('ocr-file', 'ocr-file-name')">
+                </div>
+                <div class="file-name" id="ocr-file-name"></div>
+                
+                <div class="options">
+                    <div class="option-group">
+                        <label for="ocr-dpi">OCR Resolution (DPI)</label>
+                        <select id="ocr-dpi">
+                            <option value="100">100 DPI (Fast, lower quality)</option>
+                            <option value="150" selected>150 DPI (Balanced)</option>
+                            <option value="200">200 DPI (Better quality)</option>
+                            <option value="300">300 DPI (Best quality)</option>
+                        </select>
+                    </div>
+                    <div class="option-group">
+                        <label for="ocr-lang">Language</label>
+                        <select id="ocr-lang">
+                            <option value="eng+hin">English + Hindi</option>
+                            <option value="eng">English Only</option>
+                            <option value="hin">Hindi Only</option>
+                        </select>
+                    </div>
+                    <div class="option-group">
+                        <label for="ocr-workers">Parallel Workers</label>
+                        <select id="ocr-workers">
+                            <option value="1">1 (Sequential)</option>
+                            <option value="2">2</option>
+                            <option value="4" selected>4</option>
+                            <option value="8">8</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <button class="btn btn-primary" onclick="ocrPDF()" id="ocr-btn">
+                    <span class="btn-text">Perform OCR</span>
+                </button>
+                
+                <div class="progress-container" id="ocr-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <p class="progress-text">Processing...</p>
+                </div>
+                
+                <div class="status" id="ocr-status"></div>
+                <div class="result-files" id="ocr-result"></div>
+            </div>
+
+            <!-- Split Odd/Even -->
+            <div class="tool-card" id="oddeven-tool">
+                <h3>📑 Split Odd/Even</h3>
+                <p class="description">Separate odd and even pages for duplex printing.</p>
+                
+                <div class="file-input-wrapper">
+                    <div class="file-input-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        <span>Select PDF</span>
+                    </div>
+                    <input type="file" accept=".pdf" id="oddeven-file" onchange="updateFileName('oddeven-file', 'oddeven-file-name')">
+                </div>
+                <div class="file-name" id="oddeven-file-name"></div>
+                
+                <button class="btn btn-primary" onclick="splitOddEven()" id="oddeven-btn">
+                    <span class="btn-text">Split Odd/Even Pages</span>
+                </button>
+                
+                <div class="progress-container" id="oddeven-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <p class="progress-text">Processing...</p>
+                </div>
+                
+                <div class="status" id="oddeven-status"></div>
+                <div class="result-files" id="oddeven-result"></div>
+            </div>
+
+            <!-- Compress PDF -->
+            <div class="tool-card" id="compress-tool">
+                <h3>🗜️ Compress PDF</h3>
+                <p class="description">Reduce PDF file size with OCR text layer.</p>
+                
+                <div class="file-input-wrapper">
+                    <div class="file-input-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        <span>Select PDF to Compress</span>
+                    </div>
+                    <input type="file" accept=".pdf" id="compress-file" onchange="updateFileName('compress-file', 'compress-file-name')">
+                </div>
+                <div class="file-name" id="compress-file-name"></div>
+                
+                <div class="options">
+                    <div class="option-group">
+                        <label for="compress-dpi">Output Resolution (DPI)</label>
+                        <select id="compress-dpi">
+                            <option value="72">72 DPI (Smallest size)</option>
+                            <option value="100" selected>100 DPI (Small size)</option>
+                            <option value="150">150 DPI (Balanced)</option>
+                        </select>
+                    </div>
+                    <div class="option-group">
+                        <label for="compress-lang">OCR Language</label>
+                        <select id="compress-lang">
+                            <option value="eng+hin">English + Hindi</option>
+                            <option value="eng">English Only</option>
+                            <option value="hin">Hindi Only</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <button class="btn btn-primary" onclick="compressPDF()" id="compress-btn">
+                    <span class="btn-text">Compress PDF</span>
+                </button>
+                
+                <div class="progress-container" id="compress-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <p class="progress-text">Processing...</p>
+                </div>
+                
+                <div class="status" id="compress-status"></div>
+                <div class="result-files" id="compress-result"></div>
+            </div>
+
+            <!-- PDF to Images -->
+            <div class="tool-card" id="pdfimages-tool">
+                <h3>🖼️ PDF to Images</h3>
+                <p class="description">Convert selected PDF pages to high-quality A4 images.</p>
+
+                <div class="file-input-wrapper">
+                    <div class="file-input-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 4h16v16H4z"/>
+                            <path d="M8 8h8v8H8z"/>
+                        </svg>
+                        <span>Select PDF</span>
+                    </div>
+                    <input type="file" accept=".pdf" id="pdfimages-file" onchange="onPdfImagesFileChange()">
+                </div>
+                <div class="file-name" id="pdfimages-file-name"></div>
+
+                <div class="options">
+                    <div class="option-group">
+                        <label for="pdfimages-from-page">From page</label>
+                        <input type="number" id="pdfimages-from-page" value="1" min="1">
+                    </div>
+                    <div class="option-group">
+                        <label for="pdfimages-to-page">To page</label>
+                        <input type="number" id="pdfimages-to-page" value="1" min="1">
+                    </div>
+                    <div class="option-group">
+                        <label for="pdfimages-format">Image format</label>
+                        <select id="pdfimages-format">
+                            <option value="png" selected>PNG</option>
+                            <option value="jpg">JPG</option>
+                            <option value="gif">GIF</option>
+                        </select>
+                    </div>
+                    <div class="option-group">
+                        <label for="pdfimages-dpi">Output DPI</label>
+                        <select id="pdfimages-dpi">
+                            <option value="300">300 DPI</option>
+                            <option value="600" selected>600 DPI</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary" onclick="convertPDFToImages()" id="pdfimages-btn">
+                    <span class="btn-text">Convert to Images</span>
+                </button>
+
+                <div class="progress-container" id="pdfimages-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <p class="progress-text">Processing...</p>
+                </div>
+
+                <div class="status" id="pdfimages-status"></div>
+                <div class="result-files" id="pdfimages-result"></div>
+            </div>
+
+            <!-- Passport Photos on A4 -->
+            <div class="tool-card" id="photos-tool">
+                <h3>📷 Passport Photos on A4</h3>
+                <p class="description">Turn one image into a high-quality passport-photo sheet with 5 or 6 copies on the first row.</p>
+
+                <div class="file-input-wrapper">
+                    <div class="file-input-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/>
+                            <path d="M8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/>
+                            <path d="m20 15-5-5-7 7"/>
+                        </svg>
+                        <span>Select Photo</span>
+                    </div>
+                    <input type="file" accept="image/*" id="photo-file" onchange="updateFileName('photo-file', 'photo-file-name')">
+                </div>
+                <div class="file-name" id="photo-file-name"></div>
+
+                <div class="options">
+                    <div class="option-group">
+                        <label for="photo-copies">Copies per row</label>
+                        <select id="photo-copies">
+                            <option value="5">5</option>
+                            <option value="6" selected>6</option>
+                        </select>
+                    </div>
+                    <div class="option-group">
+                        <label for="photo-dpi">Print DPI</label>
+                        <select id="photo-dpi">
+                            <option value="300" selected>300 DPI (Best quality)</option>
+                            <option value="400">400 DPI (Very high quality)</option>
+                        </select>
+                    </div>
+                    <div class="option-group">
+                        <label for="photo-gap">Gap between photos (mm)</label>
+                        <input type="number" id="photo-gap" value="5" min="0" max="20">
+                    </div>
+                </div>
+
+                <button class="btn btn-primary" onclick="createPhotoSheet()" id="photos-btn">
+                    <span class="btn-text">Create Photo Sheet</span>
+                </button>
+
+                <div class="progress-container" id="photos-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <p class="progress-text">Processing...</p>
+                </div>
+
+                <div class="status" id="photos-status"></div>
+                <div class="result-files" id="photos-result"></div>
+            </div>
+
+            <!-- AI PDF Analyzer -->
+            <div class="tool-card" id="ai-tool" style="border: 2px solid #667eea; background: linear-gradient(135deg, rgba(102,126,234,0.05) 0%, rgba(118,75,162,0.05) 100%);">
+                <h3>🤖 AI PDF Analyzer</h3>
+                <p class="description">Extract insights from PDFs using AI. Ask questions and get intelligent summaries with OpenAI, Gemini, or Ollama.</p>
+                
+                <div style="margin-top: 1rem; padding: 1rem; background: white; border-radius: 8px; border: 1px solid #ddd;">
+                    <p style="font-size: 0.875rem; margin-bottom: 0.75rem; color: #666;">
+                        <strong>Features:</strong>
+                    </p>
+                    <ul style="font-size: 0.875rem; margin-left: 1.5rem; color: #666; line-height: 1.6;">
+                        <li>PDF text extraction & analysis</li>
+                        <li>Multi-AI provider support</li>
+                        <li>Intelligent Q&A with document context</li>
+                        <li>Configurable API keys</li>
+                    </ul>
+                </div>
+
+                <a href="/ai_analyzer" class="btn btn-primary" style="display: block; margin-top: 1rem; text-decoration: none; text-align: center;">
+                    <span>Open AI Analyzer</span>
+                </a>
+            </div>
+
+            <!-- PDF Diff -->
+            <div class="tool-card" id="diff-tool" style="border: 2px solid #1e3a5f; background: linear-gradient(135deg, rgba(30,58,95,0.05) 0%, rgba(45,106,159,0.05) 100%);">
+                <h3>📄↔📄 PDF Diff</h3>
+                <p class="description">Compare two PDFs side-by-side. Highlights text changes, spelling differences, and image differences. Ignores compression and quality changes.</p>
+
+                <div style="margin-top: 1rem; padding: 1rem; background: white; border-radius: 8px; border: 1px solid #ddd;">
+                    <p style="font-size: 0.875rem; margin-bottom: 0.75rem; color: #666;">
+                        <strong>Features:</strong>
+                    </p>
+                    <ul style="font-size: 0.875rem; margin-left: 1.5rem; color: #666; line-height: 1.6;">
+                        <li>Word-level text differences (spelling, edits)</li>
+                        <li>Image comparison using perceptual hashing</li>
+                        <li>Compressed PDF = no differences vs original</li>
+                        <li>Per-page diff view with inline highlighting</li>
+                    </ul>
+                </div>
+
+                <a href="/diff" class="btn btn-primary" style="display: block; margin-top: 1rem; text-decoration: none; text-align: center; background: #1e3a5f;">
+                    <span>Open PDF Diff</span>
+                </a>
+            </div>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <p>PDF Toolkit - Platform Independent PDF Processor</p>
+        <p style="margin-top: 0.5rem; font-size: 0.75rem;">Works on Android, iPhone, Windows, Mac, and Linux</p>
+    </footer>
+
+    <script>
+        // Update file name display
+        function updateFileName(inputId, displayId) {
+            const input = document.getElementById(inputId);
+            const display = document.getElementById(displayId);
+            if (input.files.length > 0) {
+                display.textContent = '✓ ' + input.files[0].name;
+            } else {
+                display.textContent = '';
+            }
+        }
+
+        // Show status message
+        function showStatus(elementId, message, type) {
+            const el = document.getElementById(elementId);
+            el.textContent = message;
+            el.className = 'status ' + type;
+            el.style.display = 'block';
+        }
+
+        // Hide status
+        function hideStatus(elementId) {
+            const el = document.getElementById(elementId);
+            el.style.display = 'none';
+        }
+
+        // Show progress
+        function showProgress(toolId, show) {
+            const progress = document.getElementById(toolId + '-progress');
+            const btn = document.getElementById(toolId + '-btn');
+            
+            if (show) {
+                progress.style.display = 'block';
+                btn.disabled = true;
+                btn.querySelector('.btn-text').innerHTML = '<span class="spinner"></span> Processing...';
+            } else {
+                progress.style.display = 'none';
+                btn.disabled = false;
+                btn.querySelector('.btn-text').textContent = getButtonText(toolId);
+            }
+        }
+
+        function getButtonText(toolId) {
+            const texts = {
+                    'merge': 'Merge PDFs',
+                'split': 'Split PDF',
+                'ocr': 'Perform OCR',
+                'oddeven': 'Split Odd/Even Pages',
+                'compress': 'Compress PDF',
+                'pdfimages': 'Convert to Images',
+                'photos': 'Create Photo Sheet'
+            };
+            return texts[toolId] || 'Process';
+        }
+
+        // Show results
+        function showResults(resultId, files) {
+            const container = document.getElementById(resultId);
+            container.innerHTML = '';
+            
+            files.forEach(file => {
+                const div = document.createElement('div');
+                div.className = 'result-file';
+                div.innerHTML = `
+                    <span class="result-file-name">${file.filename}</span>
+                    <a href="${file.download_url}" class="btn-download" download>
+                        ⬇ Download
+                    </a>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        // Generic API call function
+        async function callAPI(endpoint, formData, toolId) {
+            showProgress(toolId, true);
+            hideStatus(toolId + '-status');
+            
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showStatus(toolId + '-status', '✓ Processing complete!', 'success');
+                    
+                    if (result.files) {
+                        showResults(toolId + '-result', result.files);
+                    } else if (result.filename) {
+                        showResults(toolId + '-result', [{
+                            filename: result.filename,
+                            download_url: result.download_url
+                        }]);
+                    }
+                } else {
+                    showStatus(toolId + '-status', '✗ ' + (result.error || 'Processing failed'), 'error');
+                }
+            } catch (error) {
+                showStatus(toolId + '-status', '✗ Error: ' + error.message, 'error');
+            } finally {
+                showProgress(toolId, false);
+            }
+        }
+
+        // Merge PDFs
+        function mergePDFs() {
+            const file1 = document.getElementById('merge-file1').files[0];
+            const file2 = document.getElementById('merge-file2').files[0];
+            
+            if (!file1 || !file2) {
+                showStatus('merge-status', 'Please select both PDF files', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file1', file1);
+            formData.append('file2', file2);
+            
+            callAPI('/api/merge', formData, 'merge');
+        }
+
+        // Split PDF
+        function splitPDF() {
+            const file = document.getElementById('split-file').files[0];
+            
+            if (!file) {
+                showStatus('split-status', 'Please select a PDF file', 'error');
+                return;
+            }
+            
+            const maxSize = document.getElementById('split-size').value;
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('max_size', maxSize);
+            
+            callAPI('/api/split', formData, 'split');
+        }
+
+        // OCR PDF
+        function ocrPDF() {
+            const file = document.getElementById('ocr-file').files[0];
+            
+            if (!file) {
+                showStatus('ocr-status', 'Please select a PDF file', 'error');
+                return;
+            }
+            
+            const dpi = document.getElementById('ocr-dpi').value;
+            const lang = document.getElementById('ocr-lang').value;
+            const workers = document.getElementById('ocr-workers').value;
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('dpi', dpi);
+            formData.append('lang', lang);
+            formData.append('workers', workers);
+            
+            callAPI('/api/ocr', formData, 'ocr');
+        }
+
+        // Split Odd/Even
+        function splitOddEven() {
+            const file = document.getElementById('oddeven-file').files[0];
+            
+            if (!file) {
+                showStatus('oddeven-status', 'Please select a PDF file', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            callAPI('/api/split_odd_even', formData, 'oddeven');
+        }
+
+        // Compress PDF
+        function compressPDF() {
+            const file = document.getElementById('compress-file').files[0];
+            
+            if (!file) {
+                showStatus('compress-status', 'Please select a PDF file', 'error');
+                return;
+            }
+            
+            const dpi = document.getElementById('compress-dpi').value;
+            const lang = document.getElementById('compress-lang').value;
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('dpi', dpi);
+            formData.append('lang', lang);
+            
+            callAPI('/api/compress', formData, 'compress');
+        }
+
+        // Create passport-photo sheet on A4
+        function createPhotoSheet() {
+            const file = document.getElementById('photo-file').files[0];
+            
+            if (!file) {
+                showStatus('photos-status', 'Please select an image file', 'error');
+                return;
+            }
+            
+            const copies = document.getElementById('photo-copies').value;
+            const dpi = document.getElementById('photo-dpi').value;
+            const gap = document.getElementById('photo-gap').value;
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('copies', copies);
+            formData.append('dpi', dpi);
+            formData.append('gap_mm', gap);
+            
+            callAPI('/api/photo_sheet', formData, 'photos');
+        }
+
+        function onPdfImagesFileChange() {
+            const file = document.getElementById('pdfimages-file').files[0];
+            const nameDisplay = document.getElementById('pdfimages-file-name');
+            const fromField = document.getElementById('pdfimages-from-page');
+            const toField = document.getElementById('pdfimages-to-page');
+
+            if (!file) {
+                nameDisplay.textContent = '';
+                return;
+            }
+
+            nameDisplay.textContent = '✓ ' + file.name;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/api/pdf_page_count', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    fromField.value = 1;
+                    fromField.min = 1;
+                    toField.value = result.pages;
+                    toField.min = 1;
+                    toField.max = result.pages;
+                } else {
+                    showStatus('pdfimages-status', '✗ ' + (result.error || 'Unable to read PDF pages'), 'error');
+                }
+            })
+            .catch(error => {
+                showStatus('pdfimages-status', '✗ Error: ' + error.message, 'error');
+            });
+        }
+
+        function convertPDFToImages() {
+            const file = document.getElementById('pdfimages-file').files[0];
+
+            if (!file) {
+                showStatus('pdfimages-status', 'Please select a PDF file', 'error');
+                return;
+            }
+
+            const fromPage = document.getElementById('pdfimages-from-page').value;
+            const toPage = document.getElementById('pdfimages-to-page').value;
+            const format = document.getElementById('pdfimages-format').value;
+            const dpi = document.getElementById('pdfimages-dpi').value;
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('from_page', fromPage);
+            formData.append('to_page', toPage);
+            formData.append('format', format);
+            formData.append('dpi', dpi);
+
+            callAPI('/api/pdf_to_images', formData, 'pdfimages');
+        }
+    </script>
+</body>
+</html>

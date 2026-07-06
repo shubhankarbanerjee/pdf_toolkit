@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Diff - Compare Two PDFs</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1e3a5f 0%, #2d6a9f 100%);
+            color: white;
+            padding: 18px 28px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        .header h1 { font-size: 22px; font-weight: 600; }
+        .header a {
+            margin-left: auto;
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            font-size: 13px;
+            padding: 6px 12px;
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 4px;
+        }
+        .header a:hover { background: rgba(255,255,255,0.15); }
+
+        .upload-section {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            gap: 16px;
+            padding: 24px 28px;
+            align-items: start;
+        }
+
+        .upload-card {
+            background: white;
+            border-radius: 8px;
+            border: 2px dashed #90b4d4;
+            padding: 24px;
+            cursor: pointer;
+            transition: all 0.25s;
+            text-align: center;
+        }
+        .upload-card:hover, .upload-card.dragover { border-color: #2d6a9f; background: #f0f7ff; }
+        .upload-card.has-file { border-style: solid; border-color: #2d6a9f; background: #f0f7ff; }
+        .upload-card .icon { font-size: 32px; margin-bottom: 8px; }
+        .upload-card .label { font-weight: 600; color: #2d6a9f; margin-bottom: 4px; font-size: 14px; }
+        .upload-card .hint { font-size: 12px; color: #888; }
+        .upload-card .file-chosen { font-size: 13px; color: #1e3a5f; font-weight: 500; margin-top: 8px; word-break: break-all; }
+        input[type="file"] { display: none; }
+
+        .vs-badge {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            align-self: center;
+            width: 40px;
+            height: 40px;
+            background: #2d6a9f;
+            color: white;
+            border-radius: 50%;
+            font-weight: 700;
+            font-size: 13px;
+            flex-shrink: 0;
+        }
+
+        .compare-bar {
+            padding: 0 28px 24px;
+        }
+        .compare-btn {
+            width: 100%;
+            padding: 14px;
+            background: #2d6a9f;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .compare-btn:hover { background: #1e3a5f; }
+        .compare-btn:disabled { background: #b0c4d8; cursor: not-allowed; }
+
+        /* ── Summary cards ── */
+        .summary {
+            display: none;
+            padding: 0 28px 20px;
+            gap: 12px;
+        }
+        .summary.visible { display: flex; flex-wrap: wrap; }
+
+        .summary-card {
+            flex: 1;
+            min-width: 140px;
+            background: white;
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+            border-top: 3px solid #2d6a9f;
+        }
+        .summary-card.ok { border-top-color: #22c55e; }
+        .summary-card.warn { border-top-color: #f59e0b; }
+        .summary-card.err { border-top-color: #ef4444; }
+        .summary-card .val { font-size: 28px; font-weight: 700; color: #1e3a5f; }
+        .summary-card .lbl { font-size: 11px; color: #888; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+        .identical-banner {
+            display: none;
+            margin: 0 28px 20px;
+            padding: 16px 20px;
+            background: #d1fae5;
+            border: 1px solid #6ee7b7;
+            border-radius: 8px;
+            color: #065f46;
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        /* ── Page navigation ── */
+        .results {
+            display: none;
+            padding: 0 28px 40px;
+        }
+        .results.visible { display: block; }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #1e3a5f;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+
+        .page-tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 20px;
+        }
+        .page-tab {
+            padding: 5px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            border: 1px solid #ddd;
+            background: white;
+            transition: all 0.15s;
+        }
+        .page-tab:hover { border-color: #2d6a9f; }
+        .page-tab.text-diff { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
+        .page-tab.img-diff  { background: #ede9fe; border-color: #8b5cf6; color: #4c1d95; }
+        .page-tab.both-diff { background: #fee2e2; border-color: #ef4444; color: #991b1b; }
+        .page-tab.active    { border-width: 2px; font-weight: 700; }
+
+        /* ── Diff viewer ── */
+        .diff-viewer {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .diff-page-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: #f0f7ff;
+            border-bottom: 1px solid #ddd;
+            font-weight: 600;
+            font-size: 14px;
+            color: #1e3a5f;
+        }
+        .diff-page-header .badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 500;
+        }
+        .badge-text { background: #fef3c7; color: #92400e; }
+        .badge-img  { background: #ede9fe; color: #4c1d95; }
+        .badge-ok   { background: #d1fae5; color: #065f46; }
+
+        .diff-text-section {
+            padding: 16px;
+            border-bottom: 1px solid #eee;
+        }
+        .diff-text-label {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #888;
+            margin-bottom: 10px;
+        }
+
+        /* Inline word diff */
+        .diff-line {
+            font-size: 13px;
+            line-height: 1.8;
+            font-family: 'Segoe UI', sans-serif;
+            word-wrap: break-word;
+        }
+        span.del {
+            background: #fee2e2;
+            color: #991b1b;
+            text-decoration: line-through;
+            padding: 1px 3px;
+            border-radius: 3px;
+            margin: 0 1px;
+        }
+        span.ins {
+            background: #dcfce7;
+            color: #166534;
+            padding: 1px 3px;
+            border-radius: 3px;
+            margin: 0 1px;
+        }
+        span.ctx { color: #555; }
+        span.ctx-ellipsis {
+            color: #aaa;
+            font-style: italic;
+            font-size: 12px;
+            cursor: pointer;
+            border: 1px dashed #ddd;
+            padding: 1px 6px;
+            border-radius: 3px;
+            margin: 0 2px;
+        }
+        span.ctx-ellipsis:hover { background: #f5f5f5; color: #888; }
+
+        /* Page only in one PDF */
+        .page-only-note {
+            padding: 12px 16px;
+            font-size: 13px;
+            font-style: italic;
+            color: #666;
+            background: #fafafa;
+        }
+
+        /* Image diffs */
+        .diff-img-section {
+            padding: 12px 16px;
+        }
+        .img-diff-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .img-diff-table th {
+            padding: 6px 10px;
+            text-align: left;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #888;
+            border-bottom: 1px solid #eee;
+        }
+        .img-diff-table td {
+            padding: 6px 10px;
+            border-bottom: 1px solid #f5f5f5;
+        }
+        .img-status-same     { color: #166534; font-weight: 500; }
+        .img-status-different{ color: #dc2626; font-weight: 500; }
+        .img-status-added    { color: #7c3aed; font-weight: 500; }
+        .img-status-removed  { color: #92400e; font-weight: 500; }
+        .img-status-unknown  { color: #888; }
+
+        .no-diff-page {
+            padding: 20px 16px;
+            font-size: 13px;
+            color: #888;
+            font-style: italic;
+            text-align: center;
+        }
+
+        /* Legend */
+        .legend {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            padding: 12px 16px;
+            background: #fafafa;
+            border-top: 1px solid #eee;
+            font-size: 12px;
+        }
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .legend-swatch { width: 14px; height: 14px; border-radius: 2px; }
+
+        /* Loading / error */
+        .status-msg {
+            display: none;
+            margin: 0 28px 20px;
+            padding: 14px 18px;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+        .status-msg.visible { display: flex; align-items: center; gap: 10px; }
+        .status-msg.info { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+        .status-msg.error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+
+        .spinner {
+            width: 16px; height: 16px;
+            border: 2px solid currentColor;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            flex-shrink: 0;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .upload-section { grid-template-columns: 1fr; }
+            .vs-badge { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <span style="font-size:22px">📄↔📄</span>
+    <h1>PDF Diff — Compare Two PDFs</h1>
+    <a href="/">← Back to Toolkit</a>
+</div>
+
+<!-- Upload area -->
+<div class="upload-section">
+    <div class="upload-card" id="drop1" onclick="document.getElementById('input1').click()"
+         ondragover="onDrag(event,'drop1')" ondragleave="offDrag('drop1')" ondrop="onDrop(event,1)">
+        <div class="icon">📄</div>
+        <div class="label">Original PDF</div>
+        <div class="hint">Click or drag a PDF here</div>
+        <div class="file-chosen" id="name1"></div>
+    </div>
+    <input type="file" id="input1" accept=".pdf,.txt" onchange="setFile(1,this)">
+
+    <div class="vs-badge">VS</div>
+
+    <div class="upload-card" id="drop2" onclick="document.getElementById('input2').click()"
+         ondragover="onDrag(event,'drop2')" ondragleave="offDrag('drop2')" ondrop="onDrop(event,2)">
+        <div class="icon">📄</div>
+        <div class="label">Modified PDF</div>
+        <div class="hint">Click or drag a PDF here</div>
+        <div class="file-chosen" id="name2"></div>
+    </div>
+    <input type="file" id="input2" accept=".pdf,.txt" onchange="setFile(2,this)">
+</div>
+
+<div class="compare-bar">
+    <button class="compare-btn" id="compareBtn" disabled onclick="compare()">Compare PDFs</button>
+</div>
+
+<!-- Status messages -->
+<div class="status-msg info" id="statusMsg">
+    <div class="spinner"></div>
+    <span id="statusText">Comparing PDFs…</span>
+</div>
+
+<!-- Identical banner -->
+<div class="identical-banner" id="identicalBanner">
+    ✅ The two PDFs are identical — no text or image differences found.
+</div>
+
+<!-- Summary cards -->
+<div class="summary" id="summary"></div>
+
+<!-- Diff results -->
+<div class="results" id="results">
+    <div class="section-title">Pages</div>
+    <div class="page-tabs" id="pageTabs"></div>
+    <div class="diff-viewer" id="diffViewer">
+        <div class="no-diff-page">Select a page above to view its diff.</div>
+    </div>
+    <div class="legend">
+        <div class="legend-item"><div class="legend-swatch" style="background:#fee2e2;border:1px solid #fca5a5"></div> Deleted text</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:#dcfce7;border:1px solid #86efac"></div> Inserted / added text</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:#fef3c7;border:1px solid #fcd34d"></div> Page has text differences</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:#ede9fe;border:1px solid #c4b5fd"></div> Page has image differences</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:#fee2e2;border:1px solid #fca5a5"></div> Page has both</div>
+    </div>
+</div>
+
+<script>
+// ── State ────────────────────────────────────────────────────
+let files = {1: null, 2: null};
+let diffData = null;
+const CONTEXT_COLLAPSE = 30; // collapse equal runs longer than N words
+
+// ── Upload helpers ───────────────────────────────────────────
+function setFile(n, input) {
+    if (!input.files.length) return;
+    files[n] = input.files[0];
+    const card = document.getElementById('drop' + n);
+    card.classList.add('has-file');
+    document.getElementById('name' + n).textContent = '📎 ' + input.files[0].name;
+    document.getElementById('compareBtn').disabled = !(files[1] && files[2]);
+}
+
+function onDrag(e, id) {
+    e.preventDefault();
+    document.getElementById(id).classList.add('dragover');
+}
+function offDrag(id) {
+    document.getElementById(id).classList.remove('dragover');
+}
+function onDrop(e, n) {
+    e.preventDefault();
+    offDrag('drop' + n);
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    files[n] = file;
+    document.getElementById('drop' + n).classList.add('has-file');
+    document.getElementById('name' + n).textContent = '📎 ' + file.name;
+    document.getElementById('compareBtn').disabled = !(files[1] && files[2]);
+}
+
+// ── Compare ──────────────────────────────────────────────────
+function compare() {
+    if (!files[1] || !files[2]) return;
+
+    showStatus('info', 'Extracting text and images from both PDFs…');
+    document.getElementById('identicalBanner').style.display = 'none';
+    document.getElementById('summary').classList.remove('visible');
+    document.getElementById('results').classList.remove('visible');
+    document.getElementById('compareBtn').disabled = true;
+
+    const fd = new FormData();
+    fd.append('file1', files[1]);
+    fd.append('file2', files[2]);
+
+    fetch('/api/diff', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('compareBtn').disabled = false;
+            hideStatus();
+            if (!data.success) {
+                showStatus('error', data.error || 'Comparison failed');
+                return;
+            }
+            diffData = data;
+            renderResults(data);
+        })
+        .catch(err => {
+            document.getElementById('compareBtn').disabled = false;
+            showStatus('error', err.message);
+        });
+}
+
+// ── Render results ───────────────────────────────────────────
+function renderResults(data) {
+    const s = data.summary;
+
+    // Identical banner
+    if (data.identical) {
+        document.getElementById('identicalBanner').style.display = 'block';
+    }
+
+    // Summary cards
+    const sumEl = document.getElementById('summary');
+    sumEl.innerHTML = `
+        <div class="summary-card ${data.identical ? 'ok' : 'warn'}">
+            <div class="val">${data.identical ? '✓' : '!'}</div>
+            <div class="lbl">${data.identical ? 'Identical' : 'Different'}</div>
+        </div>
+        <div class="summary-card">
+            <div class="val">${s.pages_pdf1}</div>
+            <div class="lbl">Pages (Original)</div>
+        </div>
+        <div class="summary-card">
+            <div class="val">${s.pages_pdf2}</div>
+            <div class="lbl">Pages (Modified)</div>
+        </div>
+        <div class="summary-card ${s.text_changes > 0 ? 'warn' : 'ok'}">
+            <div class="val">${s.text_changes}</div>
+            <div class="lbl">Text Changes</div>
+        </div>
+        <div class="summary-card ${s.image_changes > 0 ? 'warn' : 'ok'}">
+            <div class="val">${s.image_changes}</div>
+            <div class="lbl">Image Changes</div>
+        </div>
+        <div class="summary-card ${s.diff_pages.length > 0 ? 'err' : 'ok'}">
+            <div class="val">${s.diff_pages.length}</div>
+            <div class="lbl">Pages with Diffs</div>
+        </div>
+    `;
+    sumEl.classList.add('visible');
+
+    if (data.identical) return;
+
+    // Page tabs
+    const tabsEl = document.getElementById('pageTabs');
+    tabsEl.innerHTML = '';
+    data.pages.forEach(p => {
+        const tab = document.createElement('button');
+        tab.className = 'page-tab';
+        if (p.has_text_diff && p.has_image_diff) tab.classList.add('both-diff');
+        else if (p.has_text_diff) tab.classList.add('text-diff');
+        else if (p.has_image_diff) tab.classList.add('img-diff');
+        tab.textContent = 'P' + p.page;
+        tab.title = buildTabTitle(p);
+        tab.onclick = () => selectPage(p.page);
+        tab.dataset.page = p.page;
+        tabsEl.appendChild(tab);
+    });
+
+    document.getElementById('results').classList.add('visible');
+
+    // Auto-open first page with a difference
+    const firstDiff = data.pages.find(p => p.has_text_diff || p.has_image_diff);
+    if (firstDiff) selectPage(firstDiff.page);
+    else if (data.pages.length > 0) selectPage(1);
+}
+
+function buildTabTitle(p) {
+    const parts = [];
+    if (p.has_text_diff) parts.push(p.text_changes + ' text change(s)');
+    if (p.has_image_diff) parts.push('image difference(s)');
+    if (!p.in_pdf1) parts.push('only in modified');
+    if (!p.in_pdf2) parts.push('only in original');
+    return parts.length ? parts.join(', ') : 'no differences';
+}
+
+// ── Page detail view ─────────────────────────────────────────
+function selectPage(pageNum) {
+    // Update active tab
+    document.querySelectorAll('.page-tab').forEach(t => {
+        t.classList.toggle('active', parseInt(t.dataset.page) === pageNum);
+    });
+
+    const p = diffData.pages.find(x => x.page === pageNum);
+    if (!p) return;
+
+    const viewer = document.getElementById('diffViewer');
+    let html = '';
+
+    // Page header
+    let badges = '';
+    if (p.has_text_diff) badges += `<span class="badge badge-text">${p.text_changes} text change(s)</span>`;
+    if (p.has_image_diff) badges += `<span class="badge badge-img">image diff</span>`;
+    if (!p.has_text_diff && !p.has_image_diff) badges += `<span class="badge badge-ok">identical</span>`;
+    html += `<div class="diff-page-header">Page ${p.page} ${badges}</div>`;
+
+    // Page only in one PDF
+    if (!p.in_pdf1) {
+        html += `<div class="page-only-note">⚠ Page ${p.page} does not exist in the original PDF (added in modified).</div>`;
+    } else if (!p.in_pdf2) {
+        html += `<div class="page-only-note">⚠ Page ${p.page} does not exist in the modified PDF (removed from original).</div>`;
+    }
+
+    // Text diff
+    if (p.has_text_diff || (p.in_pdf1 && p.in_pdf2)) {
+        html += `<div class="diff-text-section">`;
+        html += `<div class="diff-text-label">Text Differences</div>`;
+        if (!p.has_text_diff) {
+            html += `<div style="color:#888;font-size:13px;font-style:italic">No text differences on this page.</div>`;
+        } else {
+            html += `<div class="diff-line">` + renderChunks(p.chunks) + `</div>`;
+        }
+        html += `</div>`;
+    }
+
+    // Image diffs
+    if (p.images_pdf1 > 0 || p.images_pdf2 > 0) {
+        html += `<div class="diff-img-section">`;
+        html += `<div class="diff-text-label">Image Comparison (${p.images_pdf1} in original, ${p.images_pdf2} in modified)</div>`;
+        if (p.image_diffs.length === 0) {
+            html += `<div style="color:#888;font-size:13px;font-style:italic">Images could not be extracted.</div>`;
+        } else {
+            html += `<table class="img-diff-table"><thead><tr>
+                <th>#</th><th>Status</th><th>Similarity</th><th>Notes</th>
+            </tr></thead><tbody>`;
+            p.image_diffs.forEach(d => {
+                const statusClass = 'img-status-' + d.status;
+                const statusLabel = {
+                    same: '✓ Same',
+                    different: '✗ Different',
+                    added: '+ Added',
+                    removed: '− Removed',
+                    unknown: '? Unknown'
+                }[d.status] || d.status;
+                const sim = d.similarity != null ? d.similarity + '%' : '—';
+                const note = {
+                    same: 'Visually identical (compression ignored)',
+                    different: 'Content changed',
+                    added: 'Image exists only in modified PDF',
+                    removed: 'Image exists only in original PDF',
+                    unknown: 'Could not compare'
+                }[d.status] || '';
+                html += `<tr>
+                    <td>Image ${d.index}</td>
+                    <td class="${statusClass}">${statusLabel}</td>
+                    <td>${sim}</td>
+                    <td style="color:#777;font-size:12px">${note}</td>
+                </tr>`;
+            });
+            html += `</tbody></table>`;
+        }
+        html += `</div>`;
+    }
+
+    if (!p.has_text_diff && !p.has_image_diff && p.in_pdf1 && p.in_pdf2) {
+        html += `<div class="no-diff-page">This page is identical in both PDFs.</div>`;
+    }
+
+    viewer.innerHTML = html;
+
+    // Scroll to viewer
+    viewer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ── Render word-level diff chunks ────────────────────────────
+function renderChunks(chunks) {
+    let out = '';
+    for (let i = 0; i < chunks.length; i++) {
+        const c = chunks[i];
+        if (c.type === 'equal') {
+            if (c.word_count > CONTEXT_COLLAPSE) {
+                const words = c.text.split(' ');
+                // Show first 8 and last 8 words of long equal runs
+                const head = words.slice(0, 8).join(' ');
+                const tail = words.slice(-8).join(' ');
+                out += `<span class="ctx">${esc(head)} </span>`;
+                out += `<span class="ctx-ellipsis" title="Click to expand" onclick="expandCtx(this,'${encodeURIComponent(c.text)}')"> … ${c.word_count - 16} unchanged words … </span>`;
+                out += `<span class="ctx"> ${esc(tail)}</span> `;
+            } else {
+                out += `<span class="ctx">${esc(c.text)} </span>`;
+            }
+        } else if (c.type === 'delete') {
+            out += `<span class="del" title="Removed from original">${esc(c.text)}</span> `;
+        } else if (c.type === 'insert') {
+            out += `<span class="ins" title="Added in modified">${esc(c.text)}</span> `;
+        }
+    }
+    return out;
+}
+
+function expandCtx(el, encoded) {
+    const text = decodeURIComponent(encoded);
+    el.outerHTML = `<span class="ctx">${esc(text)} </span>`;
+}
+
+function esc(text) {
+    return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Status helpers ───────────────────────────────────────────
+function showStatus(type, text) {
+    const el = document.getElementById('statusMsg');
+    el.className = 'status-msg ' + type + ' visible';
+    document.getElementById('statusText').textContent = text;
+    if (type === 'error') {
+        el.querySelector('.spinner') && (el.querySelector('.spinner').style.display = 'none');
+    }
+}
+function hideStatus() {
+    document.getElementById('statusMsg').classList.remove('visible');
+}
+</script>
+</body>
+</html>

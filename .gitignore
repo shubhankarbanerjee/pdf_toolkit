@@ -1,0 +1,20 @@
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Local uploads and generated outputs
+outputs/
+uploads/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
