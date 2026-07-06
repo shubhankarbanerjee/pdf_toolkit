@@ -731,11 +731,15 @@ Keep the summary concise and well-structured.
                 }
             provider = available[0]
         
+        # Use full document text for better analysis (increased from 3000 to 8000 chars)
+        # For large documents, provide full text to maintain context
+        doc_context = context_text[:8000] if len(context_text) > 8000 else context_text
+        
         prompt = f"""
-You are a helpful assistant analyzing a document. Answer the user's question based on the document content.
+You are a helpful assistant analyzing a document. Answer the user's question based on the document content provided.
 
 **Document Content:**
-{context_text[:3000]}
+{doc_context}
 
 **User Question:**
 {message}

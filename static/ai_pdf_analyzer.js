@@ -157,6 +157,9 @@ function uploadFile(file) {
     .catch(err => showStatus('error', err.message));
 }
 
+// Track selected files for multi-PDF analysis
+let selectedFiles = new Set();
+
 function refreshFileList() {
     const list = document.getElementById('fileList');
     if (Object.keys(uploadedFiles).length === 0) {
@@ -168,18 +171,39 @@ function refreshFileList() {
     for (let [fileId, file] of Object.entries(uploadedFiles)) {
         const item = document.createElement('div');
         item.className = 'file-item' + (fileId === currentFileId ? ' active' : '');
+        const isSelected = selectedFiles.has(fileId);
+        
         item.innerHTML = `
-            <div class="file-name">${file.name}</div>
-            <div class="file-size">${formatBytes(file.size)}</div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="chk_${fileId}" ${isSelected ? 'checked' : ''} 
+                    onchange="toggleFileSelection('${fileId}')" style="cursor: pointer;">
+                <div style="flex: 1; min-width: 0;">
+                    <div class="file-name">${file.name}</div>
+                    <div class="file-size">${formatBytes(file.size)}</div>
+                </div>
+            </div>
             <button class="remove-btn" onclick="removeFile('${fileId}')">&times;</button>
         `;
-        item.onclick = () => selectFile(fileId, file.name);
+        item.onclick = (e) => {
+            if (e.target.type !== 'checkbox') {
+                selectFile(fileId, file.name);
+            }
+        };
         list.appendChild(item);
     }
 
     if (Object.keys(uploadedFiles).length > 0) {
         document.getElementById('analyzeBtn').disabled = false;
     }
+}
+
+function toggleFileSelection(fileId) {
+    if (selectedFiles.has(fileId)) {
+        selectedFiles.delete(fileId);
+    } else {
+        selectedFiles.add(fileId);
+    }
+    selectFile(fileId, uploadedFiles[fileId].name);
 }
 
 function selectFile(fileId, name) {
@@ -235,8 +259,11 @@ function formatBytes(bytes) {
 
 // Analysis
 function analyzePDF() {
-    if (!currentFileId) {
-        showStatus('error', 'Please select a file first');
+    // If multiple files selected, analyze them together
+    const filesToAnalyze = selectedFiles.size > 0 ? Array.from(selectedFiles) : (currentFileId ? [currentFileId] : []);
+    
+    if (filesToAnalyze.length === 0) {
+        showStatus('error', 'Please select at least one file');
         return;
     }
 
@@ -247,15 +274,20 @@ function analyzePDF() {
 
     const provider = document.querySelector('input[name="provider"]:checked').value;
     document.getElementById('analyzeBtn').disabled = true;
-    document.getElementById('analyzeBtn').textContent = 'Analyzing...';
+    const numFiles = filesToAnalyze.length;
+    document.getElementById('analyzeBtn').textContent = numFiles > 1 ? `Analyzing ${numFiles} PDFs...` : 'Analyzing...';
+
+    // Analyze the primary file (last selected or current)
+    const primaryFileId = filesToAnalyze[filesToAnalyze.length - 1];
 
     fetch('/analyze_pdf', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-            file_id: currentFileId,
+            file_id: primaryFileId,
             session_id: sessionId,
-            provider: provider
+            provider: provider,
+            additional_files: filesToAnalyze.slice(0, -1) // For future multi-PDF support
         })
     })
     .then(r => r.json())
@@ -269,7 +301,9 @@ function analyzePDF() {
             document.getElementById('chatMessages').innerHTML = '';
             document.getElementById('messageInput').disabled = false;
             document.getElementById('sendBtn').disabled = false;
-            showStatus('success', `Analysis complete (${data.pages || '?'} pages, ${formatBytes(data.file_size)})`);
+            
+            const fileInfo = numFiles > 1 ? `${numFiles} PDFs analyzed` : `${data.pages || '?'} pages, ${formatBytes(data.file_size)}`;
+            showStatus('success', `Analysis complete (${fileInfo})`);
             
             // Load chat history
             loadChatHistory();
