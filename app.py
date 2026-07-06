@@ -10,7 +10,7 @@ import uuid
 import tempfile
 import traceback
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory, session
 from werkzeug.utils import secure_filename
 
 # Import PDF processing modules
@@ -27,16 +27,25 @@ from pdf_processor import (
 
 # Import AI PDF Analyzer
 try:
-    from ai_pdf_analyzer import AIPDFAnalyzer, AIConfigManager
+    from ai_pdf_analyzer import AIPDFAnalyzer, AIConfigManager, PDFTextExtractor
     HAS_AI_ANALYZER = True
 except ImportError as e:
     print(f"[WARNING] AI PDF Analyzer not available: {e}")
     HAS_AI_ANALYZER = False
 
+# Import Database Manager
+try:
+    from db_manager import DatabaseManager
+    HAS_DB = True
+except ImportError as e:
+    print(f"[WARNING] Database Manager not available: {e}")
+    HAS_DB = False
+
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['OUTPUT_FOLDER'] = 'outputs'
+app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 
 # Create necessary directories
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -47,7 +56,12 @@ ai_analyzer = None
 if HAS_AI_ANALYZER:
     ai_analyzer = AIPDFAnalyzer()
 
-# Track uploaded files for AI analysis
+# Initialize Database Manager
+db_manager = None
+if HAS_DB:
+    db_manager = DatabaseManager()
+
+# Track uploaded files for AI analysis (legacy, can be deprecated)
 ai_uploaded_files = {}
 
 # Allowed extensions
@@ -428,13 +442,99 @@ def ai_analyzer_page():
     return render_template('ai_pdf_analyzer.html')
 
 
-@app.route('/upload_pdf', methods=['POST'])
-def upload_pdf():
-    """Upload PDF/image for AI analysis."""
-    if not HAS_AI_ANALYZER:
-        return jsonify({'success': False, 'error': 'AI analyzer not available'}), 400
+# ═══════════════════════════════════════════════════════════════════════════════
+# SESSION MANAGEMENT ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/create_session', methods=['POST'])
+def create_session_route():
+    """Create a new AI analyzer session."""
+    if not HAS_DB:
+        return jsonify({'success': False, 'error': 'Database not available'}), 400
     
     try:
+        session_id = str(uuid.uuid4())
+        db_manager.create_session(session_id)
+        
+        return jsonify({
+            'success': True,
+            'session_id': session_id
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/get_session_info/<session_id>', methods=['GET'])
+def get_session_info(session_id):
+    """Get session information and stats."""
+    if not HAS_DB:
+        return jsonify({'error': 'Database not available'}), 400
+    
+    try:
+        session_info = db_manager.get_session(session_id)
+        if not session_info:
+            return jsonify({'error': 'Session not found'}), 404
+        
+        pdfs = db_manager.get_session_pdfs(session_id)
+        db_manager.update_session_access(session_id)
+        
+        return jsonify({
+            'success': True,
+            'session': dict(session_info),
+            'pdfs': [
+                {
+                    'file_id': p['file_id'],
+                    'filename': p['original_name'],
+                    'size': p['file_size'],
+                    'uploaded': p['upload_time'],
+                    'pages': p['pages']
+                }
+                for p in pdfs
+            ]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/cleanup_old_sessions', methods=['POST'])
+def cleanup_old_sessions():
+    """Clean up sessions older than 24 hours."""
+    if not HAS_DB:
+        return jsonify({'success': False, 'error': 'Database not available'}), 400
+    
+    try:
+        hours = request.form.get('hours', '24', type=int)
+        db_manager.cleanup_old_sessions(hours=hours)
+        stats = db_manager.get_database_stats()
+        
+        return jsonify({
+            'success': True,
+            'stats': stats
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PDF UPLOAD & MANAGEMENT ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/upload_pdf', methods=['POST'])
+def upload_pdf():
+    """Upload PDF/image for AI analysis with database storage."""
+    if not HAS_AI_ANALYZER or not HAS_DB:
+        return jsonify({'success': False, 'error': 'AI analyzer or database not available'}), 400
+    
+    try:
+        session_id = request.form.get('session_id')
+        if not session_id:
+            return jsonify({'success': False, 'error': 'Session ID required'}), 400
+        
+        # Verify session exists
+        if not db_manager.get_session(session_id):
+            return jsonify({'success': False, 'error': 'Invalid session'}), 400
+        
         if 'file' not in request.files:
             return jsonify({'success': False, 'error': 'No file provided'}), 400
         
@@ -451,22 +551,42 @@ def upload_pdf():
         
         # Save file
         filename = secure_filename(file.filename)
-        unique_filename = f"{uuid.uuid4()}_{filename}"
+        file_id = str(uuid.uuid4())
+        unique_filename = f"{file_id}_{filename}"
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
         file.save(file_path)
         
-        # Track file
+        # Calculate file hash
+        file_hash = PDFTextExtractor.get_file_hash(file_path)
+        file_size = os.path.getsize(file_path)
+        
+        # Store in database
+        db_manager.add_pdf(
+            file_id=file_id,
+            session_id=session_id,
+            filename=unique_filename,
+            original_name=filename,
+            file_size=file_size,
+            file_path=file_path,
+            file_hash=file_hash
+        )
+        
+        # Keep legacy tracking
         ai_uploaded_files[unique_filename] = {
             'original_name': filename,
             'path': file_path,
-            'size': os.path.getsize(file_path),
-            'type': file.content_type
+            'size': file_size,
+            'type': file.content_type,
+            'file_id': file_id,
+            'session_id': session_id
         }
         
         return jsonify({
             'success': True,
+            'file_id': file_id,
             'filename': unique_filename,
-            'original_name': filename
+            'original_name': filename,
+            'size': file_size
         })
     
     except Exception as e:
@@ -474,24 +594,71 @@ def upload_pdf():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/delete_pdf/<file_id>', methods=['DELETE'])
+def delete_pdf(file_id):
+    """Delete a PDF from session and database."""
+    if not HAS_DB:
+        return jsonify({'success': False, 'error': 'Database not available'}), 400
+    
+    try:
+        pdf_info = db_manager.get_pdf(file_id)
+        if not pdf_info:
+            return jsonify({'success': False, 'error': 'File not found'}), 404
+        
+        db_manager.delete_pdf(file_id)
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PDF ANALYSIS ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+
 @app.route('/analyze_pdf', methods=['POST'])
 def analyze_pdf():
-    """Analyze PDF and generate summary."""
-    if not HAS_AI_ANALYZER:
-        return jsonify({'success': False, 'error': 'AI analyzer not available'}), 400
+    """Analyze PDF and generate summary with database caching."""
+    if not HAS_AI_ANALYZER or not HAS_DB:
+        return jsonify({'success': False, 'error': 'AI analyzer or database not available'}), 400
     
     try:
         data = request.get_json()
-        filename = data.get('filename')
+        file_id = data.get('file_id')
+        session_id = data.get('session_id')
         provider = data.get('provider', 'gemini')
         
-        if not filename or filename not in ai_uploaded_files:
-            return jsonify({'success': False, 'error': 'File not found'}), 400
+        if not file_id or not session_id:
+            return jsonify({'success': False, 'error': 'File ID and Session ID required'}), 400
         
-        file_path = ai_uploaded_files[filename]['path']
+        # Get PDF from database
+        pdf_info = db_manager.get_pdf(file_id)
+        if not pdf_info:
+            return jsonify({'success': False, 'error': 'File not found'}), 404
         
-        # Analyze PDF
-        result = ai_analyzer.analyze_pdf(file_path, provider)
+        if pdf_info['session_id'] != session_id:
+            return jsonify({'success': False, 'error': 'File does not belong to session'}), 403
+        
+        file_path = pdf_info['file_path']
+        
+        # Extract text with database caching
+        text_content = PDFTextExtractor.extract_text(
+            file_path,
+            max_pages=None,  # No limit - unlimited
+            db_manager=db_manager,
+            file_id=file_id
+        )
+        
+        if not text_content:
+            return jsonify({'success': False, 'error': 'Failed to extract PDF text'}), 500
+        
+        # Analyze with AI
+        result = ai_analyzer.chat_with_context(
+            f"Summarize this document in a concise way, highlighting key points, main topics, and important details:\n\n",
+            text_content,
+            provider
+        )
         
         if not result.get('success'):
             return jsonify({
@@ -499,11 +666,23 @@ def analyze_pdf():
                 'error': result.get('error', 'Analysis failed')
             }), 500
         
+        # Store analysis in chat history
+        analysis_id = str(uuid.uuid4())
+        db_manager.add_chat_message(
+            message_id=analysis_id,
+            file_id=file_id,
+            session_id=session_id,
+            role='system',
+            content=result['response'],
+            provider=result['provider']
+        )
+        
         return jsonify({
             'success': True,
-            'summary': result['summary'],
+            'summary': result['response'],
             'provider': result['provider'],
-            'context': ''  # Store context server-side per filename
+            'pages': pdf_info.get('pages'),
+            'file_size': pdf_info['file_size']
         })
     
     except Exception as e:
@@ -513,36 +692,56 @@ def analyze_pdf():
 
 @app.route('/chat_pdf', methods=['POST'])
 def chat_pdf():
-    """Chat with AI about PDF content."""
-    if not HAS_AI_ANALYZER:
-        return jsonify({'success': False, 'error': 'AI analyzer not available'}), 400
+    """Chat with AI about PDF content with conversation history."""
+    if not HAS_AI_ANALYZER or not HAS_DB:
+        return jsonify({'success': False, 'error': 'AI analyzer or database not available'}), 400
     
     try:
         data = request.get_json()
-        filename = data.get('filename')
+        file_id = data.get('file_id')
+        session_id = data.get('session_id')
         message = data.get('message')
         provider = data.get('provider', 'gemini')
         
-        if not filename or filename not in ai_uploaded_files:
-            return jsonify({'success': False, 'error': 'File not found'}), 400
+        if not file_id or not session_id or not message:
+            return jsonify({'success': False, 'error': 'File ID, Session ID, and message required'}), 400
         
-        if not message:
-            return jsonify({'success': False, 'error': 'No message provided'}), 400
+        # Get PDF from database
+        pdf_info = db_manager.get_pdf(file_id)
+        if not pdf_info:
+            return jsonify({'success': False, 'error': 'File not found'}), 404
         
-        file_path = ai_uploaded_files[filename]['path']
+        if pdf_info['session_id'] != session_id:
+            return jsonify({'success': False, 'error': 'File does not belong to session'}), 403
         
-        # Extract context from PDF
-        from ai_pdf_analyzer import PDFTextExtractor
-        context = PDFTextExtractor.extract_text(file_path, max_pages=50)
+        # Get cached or extract PDF text
+        text_content = db_manager.get_cached_text(file_id)
+        if not text_content:
+            text_content = PDFTextExtractor.extract_text(
+                pdf_info['file_path'],
+                max_pages=None,
+                db_manager=db_manager,
+                file_id=file_id
+            )
+        
+        if not text_content:
+            return jsonify({'success': False, 'error': 'Failed to extract PDF text'}), 500
         
         # Chat with context
-        result = ai_analyzer.chat_with_context(message, context, provider)
+        result = ai_analyzer.chat_with_context(message, text_content, provider)
         
         if not result.get('success'):
             return jsonify({
                 'success': False,
                 'error': result.get('error', 'Chat failed')
             }), 500
+        
+        # Store conversation in database
+        user_msg_id = str(uuid.uuid4())
+        ai_msg_id = str(uuid.uuid4())
+        
+        db_manager.add_chat_message(user_msg_id, file_id, session_id, 'user', message, None)
+        db_manager.add_chat_message(ai_msg_id, file_id, session_id, 'assistant', result['response'], provider)
         
         return jsonify({
             'success': True,
@@ -554,6 +753,46 @@ def chat_pdf():
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+@app.route('/get_chat_history/<file_id>', methods=['GET'])
+def get_chat_history(file_id):
+    """Get chat history for a PDF."""
+    if not HAS_DB:
+        return jsonify({'error': 'Database not available'}), 400
+    
+    try:
+        session_id = request.args.get('session_id')
+        limit = request.args.get('limit', '50', type=int)
+        
+        if not session_id:
+            return jsonify({'error': 'Session ID required'}), 400
+        
+        # Verify file belongs to session
+        pdf_info = db_manager.get_pdf(file_id)
+        if not pdf_info or pdf_info['session_id'] != session_id:
+            return jsonify({'error': 'Access denied'}), 403
+        
+        history = db_manager.get_chat_history(file_id, limit)
+        
+        return jsonify({
+            'success': True,
+            'history': [
+                {
+                    'role': h['role'],
+                    'content': h['content'],
+                    'timestamp': h['timestamp'],
+                    'provider': h['provider']
+                }
+                for h in history
+            ]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONFIGURATION ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.route('/get_ai_config', methods=['GET'])
 def get_ai_config():
@@ -588,6 +827,22 @@ def save_ai_config():
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/get_db_stats', methods=['GET'])
+def get_db_stats():
+    """Get database statistics."""
+    if not HAS_DB:
+        return jsonify({'error': 'Database not available'}), 400
+    
+    try:
+        stats = db_manager.get_database_stats()
+        return jsonify({
+            'success': True,
+            'stats': stats
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':

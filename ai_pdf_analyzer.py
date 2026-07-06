@@ -5,9 +5,12 @@ AI PDF Analyzer Module
 
 Provides AI-powered PDF analysis with multiple LLM providers.
 Supports: OpenAI, Google Gemini, Local Ollama
+Features: Session management, PDF caching, unlimited file sizes
 """
 
 import json
+import os
+import hashlib
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -110,31 +113,62 @@ class AIConfigManager:
 
 
 class PDFTextExtractor:
-    """Extract text from PDF files."""
+    """Extract text from PDF files with caching support."""
     
     @staticmethod
-    def extract_text(pdf_path: str, max_pages: int = 50) -> str:
+    def extract_text(pdf_path: str, max_pages: int = None, db_manager=None, file_id: str = None) -> str:
         """
-        Extract text from PDF file.
+        Extract text from PDF file with optional caching.
         
         Args:
             pdf_path: Path to PDF file
-            max_pages: Maximum pages to extract
+            max_pages: Maximum pages to extract (None = all)
+            db_manager: Database manager for caching
+            file_id: File ID for cache lookup
         
         Returns:
-            Extracted text
+            Extracted text (up to 500K characters to stay within token limits)
         """
+        # Check cache first
+        if db_manager and file_id:
+            cached = db_manager.get_cached_text(file_id)
+            if cached:
+                return cached
+        
         text = ""
+        page_count = 0
+        max_chars = 500000  # ~125K tokens at 4 chars/token
         
         # Try PyMuPDF first (faster)
         if HAS_FITZ:
             try:
                 doc = fitz.open(pdf_path)
-                for page_num in range(min(len(doc), max_pages)):
-                    page = doc[page_num]
-                    text += f"\n--- Page {page_num + 1} ---\n"
-                    text += page.get_text()
+                page_count = len(doc)
+                
+                # Determine pages to extract
+                pages_to_extract = page_count
+                if max_pages:
+                    pages_to_extract = min(pages_to_extract, max_pages)
+                
+                for page_num in range(pages_to_extract):
+                    # Check character limit
+                    if len(text) >= max_chars:
+                        text += f"\n\n[... PDF truncated at {max_chars} characters - extracted {page_num} of {page_count} pages ...]"
+                        break
+                    
+                    try:
+                        page = doc[page_num]
+                        text += f"\n--- Page {page_num + 1} ---\n"
+                        text += page.get_text()
+                    except Exception as e:
+                        text += f"\n[Error reading page {page_num + 1}: {str(e)}]\n"
+                
                 doc.close()
+                
+                # Cache the text
+                if db_manager and file_id:
+                    db_manager.cache_pdf_text(file_id, text, page_count)
+                
                 return text
             except Exception as e:
                 print(f"[WARNING] PyMuPDF extraction failed: {e}")
@@ -144,15 +178,44 @@ class PDFTextExtractor:
             try:
                 with open(pdf_path, 'rb') as f:
                     reader = PyPDF2.PdfReader(f)
-                    for page_num in range(min(len(reader.pages), max_pages)):
-                        page = reader.pages[page_num]
-                        text += f"\n--- Page {page_num + 1} ---\n"
-                        text += page.extract_text()
+                    page_count = len(reader.pages)
+                    
+                    # Determine pages to extract
+                    pages_to_extract = page_count
+                    if max_pages:
+                        pages_to_extract = min(pages_to_extract, max_pages)
+                    
+                    for page_num in range(pages_to_extract):
+                        # Check character limit
+                        if len(text) >= max_chars:
+                            text += f"\n\n[... PDF truncated at {max_chars} characters - extracted {page_num} of {page_count} pages ...]"
+                            break
+                        
+                        try:
+                            page = reader.pages[page_num]
+                            text += f"\n--- Page {page_num + 1} ---\n"
+                            text += page.extract_text()
+                        except Exception as e:
+                            text += f"\n[Error reading page {page_num + 1}: {str(e)}]\n"
+                
+                # Cache the text
+                if db_manager and file_id:
+                    db_manager.cache_pdf_text(file_id, text, page_count)
+                
                 return text
             except Exception as e:
                 print(f"[WARNING] PyPDF2 extraction failed: {e}")
         
         return ""
+    
+    @staticmethod
+    def get_file_hash(file_path: str) -> str:
+        """Calculate SHA256 hash of file."""
+        sha256_hash = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
 
 
 class AIPDFAnalyzer:

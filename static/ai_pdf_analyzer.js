@@ -1,10 +1,88 @@
 /**
- * AI PDF Analyzer Frontend
+ * AI PDF Analyzer Frontend - Database-Backed Session Management
  */
 
 let uploadedFiles = {};
 let currentFile = null;
+let currentFileId = null;
+let sessionId = null;
 let currentContext = '';
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    initializeSession();
+});
+
+// Session Management
+function initializeSession() {
+    sessionId = localStorage.getItem('pdfAnalyzerSessionId');
+    
+    if (!sessionId) {
+        createNewSession();
+    } else {
+        loadSessionInfo();
+    }
+}
+
+function createNewSession() {
+    fetch('/create_session', {
+        method: 'POST'
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            sessionId = data.session_id;
+            localStorage.setItem('pdfAnalyzerSessionId', sessionId);
+            updateSessionDisplay();
+            showStatus('success', 'New session created');
+            refreshFileList();
+        } else {
+            showStatus('error', data.error || 'Failed to create session');
+        }
+    })
+    .catch(err => showStatus('error', err.message));
+}
+
+function loadSessionInfo() {
+    fetch(`/get_session_info/${sessionId}`)
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            uploadedFiles = {};
+            data.pdfs.forEach(pdf => {
+                uploadedFiles[pdf.file_id] = {
+                    name: pdf.filename,
+                    size: pdf.size,
+                    file_id: pdf.file_id,
+                    pages: pdf.pages
+                };
+            });
+            refreshFileList();
+            updateSessionDisplay();
+        } else {
+            createNewSession();
+        }
+    })
+    .catch(err => {
+        console.error('Failed to load session:', err);
+        createNewSession();
+    });
+}
+
+function updateSessionDisplay() {
+    const header = document.querySelector('.header');
+    if (header && !document.getElementById('sessionDisplay')) {
+        const div = document.createElement('div');
+        div.id = 'sessionDisplay';
+        div.style.cssText = 'padding: 10px; background: #f0f4ff; border-bottom: 1px solid #ddd; font-size: 12px; color: #666; text-align: right;';
+        header.appendChild(div);
+    }
+    
+    const sessionDisplay = document.getElementById('sessionDisplay');
+    if (sessionDisplay && sessionId) {
+        sessionDisplay.innerHTML = `Session: <code>${sessionId.substring(0, 8)}...</code> | <a href="#" onclick="createNewSession(); return false;" style="color: #667eea;">New Session</a>`;
+    }
+}
 
 // File upload handlers
 function handleDragOver(e) {
@@ -46,8 +124,14 @@ function handleFiles(files) {
 }
 
 function uploadFile(file) {
+    if (!sessionId) {
+        showStatus('error', 'No active session');
+        return;
+    }
+
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('session_id', sessionId);
 
     showStatus('info', `Uploading ${file.name}...`);
 
@@ -58,13 +142,13 @@ function uploadFile(file) {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            uploadedFiles[data.filename] = {
-                name: file.name,
-                size: file.size,
-                type: file.type
+            uploadedFiles[data.file_id] = {
+                name: data.original_name,
+                size: data.size,
+                file_id: data.file_id
             };
             refreshFileList();
-            showStatus('success', `${file.name} uploaded successfully`);
+            showStatus('success', `${file.name} uploaded successfully (${formatBytes(data.size)})`);
             document.getElementById('fileInput').value = '';
         } else {
             showStatus('error', data.error || 'Upload failed');
@@ -81,15 +165,15 @@ function refreshFileList() {
     }
 
     list.innerHTML = '';
-    for (let [filename, file] of Object.entries(uploadedFiles)) {
+    for (let [fileId, file] of Object.entries(uploadedFiles)) {
         const item = document.createElement('div');
-        item.className = 'file-item' + (filename === currentFile ? ' active' : '');
+        item.className = 'file-item' + (fileId === currentFileId ? ' active' : '');
         item.innerHTML = `
             <div class="file-name">${file.name}</div>
             <div class="file-size">${formatBytes(file.size)}</div>
-            <button class="remove-btn" onclick="removeFile('${filename}')">&times;</button>
+            <button class="remove-btn" onclick="removeFile('${fileId}')">&times;</button>
         `;
-        item.onclick = () => selectFile(filename, file.name);
+        item.onclick = () => selectFile(fileId, file.name);
         list.appendChild(item);
     }
 
@@ -98,8 +182,9 @@ function refreshFileList() {
     }
 }
 
-function selectFile(filename, name) {
-    currentFile = filename;
+function selectFile(fileId, name) {
+    currentFileId = fileId;
+    currentFile = fileId;
     currentContext = '';
     refreshFileList();
     document.getElementById('chatTitle').textContent = `📄 ${name}`;
@@ -114,30 +199,49 @@ function selectFile(filename, name) {
     `;
 }
 
-function removeFile(filename) {
-    delete uploadedFiles[filename];
-    if (currentFile === filename) {
-        currentFile = null;
-        currentContext = '';
+function removeFile(fileId) {
+    if (!confirm('Delete this file? This action cannot be undone.')) {
+        return;
     }
-    refreshFileList();
-    if (Object.keys(uploadedFiles).length === 0) {
-        document.getElementById('analyzeBtn').disabled = true;
-    }
+
+    fetch(`/delete_pdf/${fileId}`, {
+        method: 'DELETE'
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            delete uploadedFiles[fileId];
+            if (currentFileId === fileId) {
+                currentFileId = null;
+                currentFile = null;
+                currentContext = '';
+            }
+            refreshFileList();
+            showStatus('success', 'File deleted');
+        } else {
+            showStatus('error', data.error || 'Failed to delete file');
+        }
+    })
+    .catch(err => showStatus('error', err.message));
 }
 
 function formatBytes(bytes) {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB'];
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 }
 
 // Analysis
 function analyzePDF() {
-    if (!currentFile) {
+    if (!currentFileId) {
         showStatus('error', 'Please select a file first');
+        return;
+    }
+
+    if (!sessionId) {
+        showStatus('error', 'No active session');
         return;
     }
 
@@ -149,14 +253,15 @@ function analyzePDF() {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-            filename: currentFile,
+            file_id: currentFileId,
+            session_id: sessionId,
             provider: provider
         })
     })
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            currentContext = data.context;
+            currentContext = data.summary;
             document.getElementById('summaryContent').innerHTML = marked(data.summary);
             document.getElementById('summarySection').style.display = 'block';
             document.getElementById('emptyPlaceholder').style.display = 'none';
@@ -164,7 +269,10 @@ function analyzePDF() {
             document.getElementById('chatMessages').innerHTML = '';
             document.getElementById('messageInput').disabled = false;
             document.getElementById('sendBtn').disabled = false;
-            showStatus('success', 'Analysis complete');
+            showStatus('success', `Analysis complete (${data.pages || '?'} pages, ${formatBytes(data.file_size)})`);
+            
+            // Load chat history
+            loadChatHistory();
         } else {
             showStatus('error', data.error || 'Analysis failed');
         }
@@ -183,7 +291,12 @@ function sendMessage() {
     const input = document.getElementById('messageInput');
     const message = input.value.trim();
 
-    if (!message || !currentFile) {
+    if (!message || !currentFileId) {
+        return;
+    }
+
+    if (!sessionId) {
+        showStatus('error', 'No active session');
         return;
     }
 
@@ -199,7 +312,8 @@ function sendMessage() {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-            filename: currentFile,
+            file_id: currentFileId,
+            session_id: sessionId,
             message: message,
             provider: provider
         })
@@ -237,6 +351,26 @@ function addMessage(role, text) {
     message.appendChild(bubble);
     container.appendChild(message);
     container.scrollTop = container.scrollHeight;
+}
+
+function loadChatHistory() {
+    if (!currentFileId) return;
+
+    fetch(`/get_chat_history/${currentFileId}?session_id=${sessionId}&limit=50`)
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && data.history && data.history.length > 0) {
+            const container = document.getElementById('chatMessages');
+            container.innerHTML = '';
+            
+            data.history.forEach(msg => {
+                if (msg.role !== 'system') {  // Skip system messages
+                    addMessage(msg.role, msg.content);
+                }
+            });
+        }
+    })
+    .catch(err => console.error('Failed to load chat history:', err));
 }
 
 // Input auto-expand
