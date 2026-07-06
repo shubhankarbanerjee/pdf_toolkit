@@ -525,17 +525,11 @@ Keep the summary concise and well-structured.
                         'summary': result.get('response', ''),
                         'timestamp': datetime.now().isoformat()
                     }
-                elif response.status_code in [404, 405]:
-                    # Endpoint not found or method not allowed - try Msty OpenAI-compatible endpoint
-                    print(f"[DEBUG] Native endpoint returned {response.status_code}, trying Msty fallback...")
-                    pass
                 else:
-                    error_body = response.text[:500] if response.text else "No response body"
-                    print(f"[WARNING] Native endpoint error: HTTP {response.status_code} - {error_body}")
-                    return {
-                        'success': False,
-                        'error': f'Ollama error: HTTP {response.status_code} - {error_body[:100]}'
-                    }
+                    # Any error (404, 405, 500, etc) - try Msty fallback
+                    error_body = response.text[:200] if response.text else ""
+                    print(f"[DEBUG] Native endpoint error HTTP {response.status_code}{f' - {error_body}' if error_body else ''}, trying Msty fallback...")
+                    pass
             except requests.exceptions.ConnectionError as e:
                 print(f"[WARNING] Connection error on native endpoint: {e}")
                 print(f"[DEBUG] Trying Msty fallback...")
@@ -686,16 +680,11 @@ Provide a clear, concise answer based on the document. If the answer is not in t
                                 'response': result.get('response', ''),
                                 'provider': provider
                             }
-                        elif response.status_code in [404, 405]:
-                            print(f"[DEBUG] Chat: Native endpoint returned {response.status_code}, trying Msty fallback...")
-                            pass
                         else:
-                            error_body = response.text[:500] if response.text else "No response body"
-                            print(f"[WARNING] Chat: Native endpoint error: HTTP {response.status_code}")
-                            return {
-                                'success': False,
-                                'error': f'Ollama error: HTTP {response.status_code}'
-                            }
+                            # Any error (404, 405, 500, etc) - try Msty fallback
+                            error_body = response.text[:200] if response.text else ""
+                            print(f"[DEBUG] Chat: Native endpoint error HTTP {response.status_code}{f' - {error_body}' if error_body else ''}, trying Msty fallback...")
+                            pass
                     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
                         print(f"[DEBUG] Chat: Native endpoint connection error: {e}, trying Msty fallback...")
                     
