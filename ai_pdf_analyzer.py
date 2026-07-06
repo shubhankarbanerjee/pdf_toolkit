@@ -46,6 +46,12 @@ try:
 except ImportError:
     HAS_FITZ = False
 
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+
 
 class AIConfigManager:
     """Manage AI provider configurations and API keys."""
@@ -256,7 +262,14 @@ class AIPDFAnalyzer:
         if HAS_REQUESTS and self.config['ollama']['enabled']:
             self.ollama_available = self._check_ollama_connection()
             if self.ollama_available:
-                self.ollama_model = self._get_best_ollama_model()
+                # First check if user has set a preference
+                user_model = self.config['ollama'].get('model', '').strip()
+                if user_model and user_model != '':
+                    self.ollama_model = user_model
+                    print(f"[OK] Using user-selected model: {self.ollama_model}")
+                else:
+                    # Auto-select best model
+                    self.ollama_model = self._get_best_ollama_model()
     
     def _check_ollama_connection(self) -> bool:
         """Test Ollama connection. Returns True if reachable."""
@@ -316,13 +329,18 @@ class AIPDFAnalyzer:
         return None
     
     def _score_models(self, models: List[Dict[str, Any]], is_ollama: bool = True) -> Optional[str]:
-        """Score and select the best model for PDF analysis.
+        """Score and select the best model for PDF analysis considering system RAM.
         
         Scoring priorities:
-        1. Vision models (for PDFs with images)
-        2. Larger models (better quality)
-        3. Specific good models (llama, mistral, neural-chat)
+        1. Model fits in available RAM (hard constraint)
+        2. Vision models (for PDFs with images)
+        3. Good quality models (llama3, mistral, etc)
+        4. Avoid oversized models on low-RAM systems
         """
+        # Get available system memory
+        available_gb = self._get_available_ram_gb()
+        print(f"[DEBUG] Available system RAM: {available_gb:.1f} GB")
+        
         scored = []
         
         for model in models:
@@ -333,6 +351,14 @@ class AIPDFAnalyzer:
             score = 0
             name_lower = name.lower()
             
+            # Estimate RAM requirement based on model name
+            estimated_ram = self._estimate_model_ram(name_lower)
+            
+            # Hard constraint: skip if model clearly too large for available RAM
+            if estimated_ram > available_gb * 0.9:  # Leave 10% buffer
+                print(f"[DEBUG] Skipping {name}: needs ~{estimated_ram}GB, only {available_gb:.1f}GB available")
+                continue
+            
             # Vision models: highest priority for PDF analysis
             if 'vision' in name_lower:
                 score += 100
@@ -341,28 +367,67 @@ class AIPDFAnalyzer:
             if any(x in name_lower for x in ['llama3', 'mistral', 'neural-chat', 'yi', 'qwen']):
                 score += 50
             
-            # Avoid very small models
-            if any(x in name_lower for x in ['0.5b', '1b', '2b']):
-                score -= 30
+            # Favor smaller models on memory-constrained systems
+            if available_gb < 8:  # Low RAM system
+                if '1b' in name_lower:
+                    score += 40  # Prefer tiny models
+                elif '3b' in name_lower or '4b' in name_lower:
+                    score += 30
+                elif '7b' in name_lower:
+                    score += 20
+                elif '13b' in name_lower:
+                    score += 10
+                else:
+                    score -= 50  # Penalize unknown large models
+            else:  # Plenty of RAM
+                # Prefer larger models (better quality)
+                if '70b' in name_lower or '65b' in name_lower:
+                    score += 40
+                elif '13b' in name_lower:
+                    score += 20
+                elif '7b' in name_lower:
+                    score += 10
             
-            # Prefer larger models (7b, 13b, 70b)
-            if '70b' in name_lower or '65b' in name_lower:
-                score += 40
-            elif '13b' in name_lower:
-                score += 20
-            elif '7b' in name_lower:
-                score += 10
-            
-            scored.append((name, score))
+            scored.append((name, score, estimated_ram))
         
         if scored:
             # Sort by score (descending) and return best
             scored.sort(key=lambda x: x[1], reverse=True)
-            best_name, best_score = scored[0]
-            print(f"[OK] Model scores: {[(n, s) for n, s in scored[:3]]}")
+            best_name, best_score, best_ram = scored[0]
+            print(f"[OK] Model scores: {[(n, s) for n, s, _ in scored[:3]]}")
+            print(f"[OK] Selected {best_name} (est. {best_ram}GB RAM)")
             return best_name
         
         return None
+    
+    def _get_available_ram_gb(self) -> float:
+        """Get available system RAM in GB."""
+        try:
+            if HAS_PSUTIL:
+                return psutil.virtual_memory().available / (1024**3)
+        except Exception:
+            pass
+        # Fallback estimate
+        return 4.0
+    
+    def _estimate_model_ram(self, model_name: str) -> float:
+        """Estimate RAM requirement (GB) for a model based on its name."""
+        # Common model size to RAM mappings
+        if any(x in model_name for x in ['0.5b']):
+            return 1.0
+        elif any(x in model_name for x in ['1b']):
+            return 2.0
+        elif any(x in model_name for x in ['3b', '4b']):
+            return 3.5
+        elif any(x in model_name for x in ['7b']):
+            return 6.0
+        elif any(x in model_name for x in ['13b']):
+            return 10.0
+        elif any(x in model_name for x in ['70b', '65b']):
+            return 40.0
+        else:
+            # Unknown model - assume medium sized
+            return 8.0
 
     def get_available_providers(self) -> List[str]:
         """Get list of enabled and available providers."""
@@ -376,6 +441,66 @@ class AIPDFAnalyzer:
             providers.append('ollama')
         
         return providers
+    
+    def get_available_ollama_models(self) -> List[Dict[str, Any]]:
+        """Fetch and return list of available Ollama models with metadata."""
+        models = []
+        available_ram = self._get_available_ram_gb()
+        
+        if not self.ollama_available or not HAS_REQUESTS:
+            return models
+        
+        host = self.config['ollama']['host'].rstrip('/')
+        
+        try:
+            # Try native Ollama endpoint
+            resp = requests.get(f"{host}/api/tags", timeout=5)
+            if resp.status_code == 200:
+                raw_models = resp.json().get('models', [])
+                for m in raw_models:
+                    name = m.get('name', '')
+                    if name:
+                        estimated_ram = self._estimate_model_ram(name.lower())
+                        models.append({
+                            'name': name,
+                            'estimated_ram_gb': estimated_ram,
+                            'fits_in_memory': estimated_ram <= available_ram * 0.9
+                        })
+                return models
+        except Exception:
+            pass
+        
+        try:
+            # Fallback to OpenAI-compatible endpoint
+            resp = requests.get(f"{host}/v1/models", timeout=5)
+            if resp.status_code == 200:
+                raw_models = resp.json().get('data', [])
+                for m in raw_models:
+                    name = m.get('id', '')
+                    if name:
+                        estimated_ram = self._estimate_model_ram(name.lower())
+                        models.append({
+                            'name': name,
+                            'estimated_ram_gb': estimated_ram,
+                            'fits_in_memory': estimated_ram <= available_ram * 0.9
+                        })
+                return models
+        except Exception:
+            pass
+        
+        return models
+    
+    def set_ollama_model(self, model_name: str) -> bool:
+        """Save user's model preference to config."""
+        try:
+            self.config['ollama']['model'] = model_name
+            self.config_manager.save_config(self.config)
+            self.ollama_model = model_name
+            print(f"[OK] Saved model preference: {model_name}")
+            return True
+        except Exception as e:
+            print(f"[ERROR] Failed to save model preference: {e}")
+            return False
     
     def analyze_pdf(self, pdf_path: str, provider: Optional[str] = None) -> Dict[str, Any]:
         """

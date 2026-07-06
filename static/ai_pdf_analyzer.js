@@ -413,16 +413,19 @@ function testOllama() {
                 ? `Available models: ${data.models.join(', ')}`
                 : 'Connected (no models found - pull a model first)';
             result.innerHTML = `<span style="color:#155724">✓ ${data.message}<br>${modelList}</span>`;
+            
+            // Reload available models in the dropdown
+            loadAvailableModels();
         } else {
             result.innerHTML = `<span style="color:#721c24">✗ ${data.error}</span>`;
         }
         btn.disabled = false;
-        btn.textContent = 'Test Connection';
+        btn.textContent = 'Refresh Models & Test';
     })
     .catch(err => {
         result.innerHTML = `<span style="color:#721c24">✗ ${err.message}</span>`;
         btn.disabled = false;
-        btn.textContent = 'Test Connection';
+        btn.textContent = 'Refresh Models & Test';
     });
 }
 
@@ -438,15 +441,73 @@ function openSettings() {
             document.getElementById('openaiEnabled').checked = data.openai.enabled || false;
 
             document.getElementById('ollamaHost').value = data.ollama.host || 'http://localhost:11434';
-            document.getElementById('ollamaModel').value = data.ollama.model || 'llama2';
+            // Store the user preference but don't set it yet - we'll load models first
+            window.userSelectedModel = data.ollama.model || '';
             document.getElementById('ollamaEnabled').checked = data.ollama.enabled || false;
 
             document.getElementById('settingsModal').classList.add('active');
+            
+            // Load available models
+            loadAvailableModels();
         });
 }
 
 function closeSettings() {
     document.getElementById('settingsModal').classList.remove('active');
+}
+
+function loadAvailableModels() {
+    fetch('/get_ollama_models')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const select = document.getElementById('ollamaModel');
+                const options = select.querySelectorAll('option');
+                
+                // Keep only the first option (auto-select)
+                while (select.options.length > 1) {
+                    select.remove(1);
+                }
+                
+                // Add available models
+                data.models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.name;
+                    const ramInfo = model.fits_in_memory ? '✓' : '⚠️ Limited RAM';
+                    option.textContent = `${model.name} (est. ${model.estimated_ram_gb.toFixed(1)}GB) ${ramInfo}`;
+                    select.appendChild(option);
+                });
+                
+                // Set current model if user has selected one
+                if (window.userSelectedModel) {
+                    select.value = window.userSelectedModel;
+                } else {
+                    select.value = ''; // Auto-select
+                }
+                
+                // Update display info
+                document.getElementById('availableRam').textContent = data.available_ram_gb.toFixed(1);
+                document.getElementById('currentModel').textContent = data.current_model || 'Auto-selecting...';
+                
+            } else {
+                console.error('Failed to load models:', data.error);
+            }
+        })
+        .catch(err => {
+            console.error('Error loading models:', err);
+            document.getElementById('ollamaTestResult').innerHTML = `<span style="color:#d32f2f">Error loading models: ${err.message}</span>`;
+        });
+}
+
+function onModelSelectionChange() {
+    const selected = document.getElementById('ollamaModel').value;
+    window.userSelectedModel = selected;
+    
+    if (selected === '') {
+        console.log('Auto-selection enabled');
+    } else {
+        console.log('Manual model selected:', selected);
+    }
 }
 
 function saveSettings() {
@@ -462,7 +523,7 @@ function saveSettings() {
         },
         ollama: {
             host: document.getElementById('ollamaHost').value,
-            model: document.getElementById('ollamaModel').value,
+            model: document.getElementById('ollamaModel').value, // Use current dropdown value
             enabled: document.getElementById('ollamaEnabled').checked
         }
     };

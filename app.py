@@ -1001,6 +1001,54 @@ def save_ai_config():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/get_ollama_models', methods=['GET'])
+def get_ollama_models():
+    """Get list of available Ollama models with metadata."""
+    if not HAS_AI_ANALYZER:
+        return jsonify({'success': False, 'error': 'AI analyzer not available'}), 400
+    
+    try:
+        models = ai_analyzer.get_available_ollama_models()
+        current_model = ai_analyzer.ollama_model
+        available_ram = ai_analyzer._get_available_ram_gb()
+        
+        return jsonify({
+            'success': True,
+            'models': models,
+            'current_model': current_model,
+            'available_ram_gb': available_ram
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/set_ollama_model', methods=['POST'])
+def set_ollama_model():
+    """Set user's preferred Ollama model."""
+    if not HAS_AI_ANALYZER:
+        return jsonify({'success': False, 'error': 'AI analyzer not available'}), 400
+    
+    try:
+        data = request.get_json()
+        model_name = data.get('model')
+        
+        if not model_name:
+            return jsonify({'success': False, 'error': 'Model name required'}), 400
+        
+        success = ai_analyzer.set_ollama_model(model_name)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'Model set to {model_name}',
+                'current_model': ai_analyzer.ollama_model
+            })
+        else:
+            return jsonify({'success': False, 'error': 'Failed to set model'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/get_db_stats', methods=['GET'])
 def get_db_stats():
     """Get database statistics."""
