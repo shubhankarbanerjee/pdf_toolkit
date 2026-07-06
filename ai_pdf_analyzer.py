@@ -649,31 +649,97 @@ Provide a clear, concise answer based on the document. If the answer is not in t
                     'provider': provider
                 }
             elif provider == 'ollama':
-                # Re-check connection in case host/port changed since startup
-                if not self._check_ollama_connection():
+                # Use the auto-selected model with endpoint fallback
+                if not self.ollama_model:
                     return {
                         'success': False,
-                        'error': f'Ollama not reachable at {self.config["ollama"]["host"]} - check host, port, and that Ollama is running'
+                        'error': 'No Ollama models available - pull a model first'
                     }
-                response = requests.post(
-                    f"{self.config['ollama']['host'].rstrip('/')}/api/generate",
-                    json={
-                        "model": self.config['ollama']['model'],
-                        "prompt": prompt,
-                        "stream": False
-                    },
-                    timeout=120
-                )
-                if response.status_code == 200:
-                    return {
-                        'success': True,
-                        'response': response.json().get('response', ''),
-                        'provider': provider
-                    }
-                else:
+                
+                host = self.config['ollama']['host'].rstrip('/')
+                model = self.ollama_model
+                
+                print(f"[DEBUG] Chat: Starting Ollama analysis with model: {model} at {host}")
+                
+                try:
+                    # Try native Ollama endpoint first
+                    try:
+                        url = f"{host}/api/generate"
+                        print(f"[DEBUG] Chat: Trying native Ollama endpoint: POST {url}")
+                        response = requests.post(
+                            url,
+                            json={
+                                "model": model,
+                                "prompt": prompt,
+                                "stream": False
+                            },
+                            timeout=120
+                        )
+                        
+                        print(f"[DEBUG] Chat: Response status: {response.status_code}")
+                        
+                        if response.status_code == 200:
+                            result = response.json()
+                            print(f"[OK] Chat: Ollama analysis succeeded")
+                            return {
+                                'success': True,
+                                'response': result.get('response', ''),
+                                'provider': provider
+                            }
+                        elif response.status_code in [404, 405]:
+                            print(f"[DEBUG] Chat: Native endpoint returned {response.status_code}, trying Msty fallback...")
+                            pass
+                        else:
+                            error_body = response.text[:500] if response.text else "No response body"
+                            print(f"[WARNING] Chat: Native endpoint error: HTTP {response.status_code}")
+                            return {
+                                'success': False,
+                                'error': f'Ollama error: HTTP {response.status_code}'
+                            }
+                    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                        print(f"[DEBUG] Chat: Native endpoint connection error: {e}, trying Msty fallback...")
+                    
+                    # Fallback to Msty's OpenAI-compatible endpoint
+                    url_fallback = f"{host}/v1/chat/completions"
+                    print(f"[DEBUG] Chat: Trying Msty endpoint: POST {url_fallback}")
+                    response = requests.post(
+                        url_fallback,
+                        json={
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": "You are a document assistant."},
+                                {"role": "user", "content": prompt}
+                            ],
+                            "temperature": 0.7,
+                            "max_tokens": 1000
+                        },
+                        timeout=120
+                    )
+                    
+                    print(f"[DEBUG] Chat: Msty response status: {response.status_code}")
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        message_content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+                        print(f"[OK] Chat: Msty analysis succeeded")
+                        return {
+                            'success': True,
+                            'response': message_content,
+                            'provider': f"{provider} (Msty)"
+                        }
+                    else:
+                        error_body = response.text[:500] if response.text else "No response body"
+                        print(f"[ERROR] Chat: Msty endpoint returned HTTP {response.status_code}")
+                        return {
+                            'success': False,
+                            'error': f'Ollama request failed: HTTP {response.status_code}'
+                        }
+                except Exception as e:
+                    error_msg = str(e)
+                    print(f"[ERROR] Chat: Unexpected exception in Ollama: {error_msg}")
                     return {
                         'success': False,
-                        'error': f'Ollama request failed: HTTP {response.status_code}'
+                        'error': f'Ollama analysis failed: {error_msg}'
                     }
             else:
                 return {
