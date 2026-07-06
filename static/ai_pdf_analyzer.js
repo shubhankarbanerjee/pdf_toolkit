@@ -387,6 +387,45 @@ document.getElementById('messageInput').addEventListener('keydown', function(e) 
 });
 
 // Settings
+function testOllama() {
+    const host = document.getElementById('ollamaHost').value.trim();
+    const btn = document.getElementById('ollamaTestBtn');
+    const result = document.getElementById('ollamaTestResult');
+
+    if (!host) {
+        result.innerHTML = '<span style="color:#721c24">Please enter a host URL</span>';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Testing...';
+    result.innerHTML = '';
+
+    fetch('/test_ollama', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ host: host })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const modelList = data.models && data.models.length
+                ? `Available models: ${data.models.join(', ')}`
+                : 'Connected (no models found - pull a model first)';
+            result.innerHTML = `<span style="color:#155724">✓ ${data.message}<br>${modelList}</span>`;
+        } else {
+            result.innerHTML = `<span style="color:#721c24">✗ ${data.error}</span>`;
+        }
+        btn.disabled = false;
+        btn.textContent = 'Test Connection';
+    })
+    .catch(err => {
+        result.innerHTML = `<span style="color:#721c24">✗ ${err.message}</span>`;
+        btn.disabled = false;
+        btn.textContent = 'Test Connection';
+    });
+}
+
 function openSettings() {
     fetch('/get_ai_config')
         .then(r => r.json())

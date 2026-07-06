@@ -1,0 +1,16 @@
+{
+  "gemini": {
+    "api_key": "",
+    "enabled": false
+  },
+  "openai": {
+    "api_key": "",
+    "model": "gpt-4-turbo",
+    "enabled": false
+  },
+  "ollama": {
+    "host": "http://192.168.1.15:11964",
+    "model": "llama2",
+    "enabled": true
+  }
+}

@@ -794,6 +794,45 @@ def get_chat_history(file_id):
 # CONFIGURATION ROUTES
 # ═══════════════════════════════════════════════════════════════════════════════
 
+@app.route('/test_ollama', methods=['POST'])
+def test_ollama():
+    """Test Ollama connection at a given host URL."""
+    if not HAS_AI_ANALYZER:
+        return jsonify({'success': False, 'error': 'AI analyzer not available'}), 400
+    
+    try:
+        data = request.get_json()
+        host = data.get('host', '').rstrip('/')
+        if not host:
+            return jsonify({'success': False, 'error': 'Host URL required'}), 400
+        
+        import requests as req
+        try:
+            resp = req.get(f"{host}/api/tags", timeout=5)
+            if resp.status_code == 200:
+                tags_data = resp.json()
+                models = [m.get('name', '') for m in tags_data.get('models', [])]
+                return jsonify({
+                    'success': True,
+                    'message': f'Connected to Ollama at {host}',
+                    'models': models
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'Ollama responded with HTTP {resp.status_code}'
+                })
+        except req.exceptions.ConnectionError:
+            return jsonify({'success': False, 'error': f'Connection refused at {host} - check host and port'})
+        except req.exceptions.Timeout:
+            return jsonify({'success': False, 'error': f'Connection timed out at {host}'})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)})
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/get_ai_config', methods=['GET'])
 def get_ai_config():
     """Get current AI configuration."""

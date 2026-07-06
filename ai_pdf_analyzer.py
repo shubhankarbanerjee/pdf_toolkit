@@ -252,14 +252,29 @@ class AIPDFAnalyzer:
         
         # Check Ollama
         if HAS_REQUESTS and self.config['ollama']['enabled']:
-            try:
-                resp = requests.get(f"{self.config['ollama']['host']}/api/tags", timeout=2)
-                if resp.status_code == 200:
-                    self.ollama_available = True
-                    print("[OK] Ollama available")
-            except Exception as e:
-                print(f"[WARNING] Ollama not available: {e}")
+            self.ollama_available = self._check_ollama_connection()
     
+    def _check_ollama_connection(self) -> bool:
+        """Test Ollama connection. Returns True if reachable."""
+        if not HAS_REQUESTS or not self.config['ollama']['enabled']:
+            return False
+        host = self.config['ollama']['host'].rstrip('/')
+        try:
+            resp = requests.get(f"{host}/api/tags", timeout=5)
+            if resp.status_code == 200:
+                print(f"[OK] Ollama connected at {host}")
+                return True
+            else:
+                print(f"[WARNING] Ollama responded with HTTP {resp.status_code} at {host}")
+                return False
+        except requests.exceptions.ConnectionError:
+            print(f"[WARNING] Ollama not reachable at {host} - connection refused")
+        except requests.exceptions.Timeout:
+            print(f"[WARNING] Ollama timed out at {host} - check host/port")
+        except Exception as e:
+            print(f"[WARNING] Ollama check failed: {e}")
+        return False
+
     def get_available_providers(self) -> List[str]:
         """Get list of enabled and available providers."""
         providers = []
@@ -384,14 +399,14 @@ Keep the summary concise and well-structured.
         """Analyze using local Ollama."""
         try:
             response = requests.post(
-                f"{self.config['ollama']['host']}/api/generate",
+                f"{self.config['ollama']['host'].rstrip('/')}/api/generate",
                 json={
                     "model": self.config['ollama']['model'],
                     "prompt": prompt,
                     "stream": False,
                     "temperature": 0.7
                 },
-                timeout=60
+                timeout=120
             )
             
             if response.status_code == 200:
@@ -470,15 +485,21 @@ Provide a clear, concise answer based on the document. If the answer is not in t
                     'response': response.choices[0].message.content,
                     'provider': provider
                 }
-            elif provider == 'ollama' and self.ollama_available:
+            elif provider == 'ollama':
+                # Re-check connection in case host/port changed since startup
+                if not self._check_ollama_connection():
+                    return {
+                        'success': False,
+                        'error': f'Ollama not reachable at {self.config["ollama"]["host"]} - check host, port, and that Ollama is running'
+                    }
                 response = requests.post(
-                    f"{self.config['ollama']['host']}/api/generate",
+                    f"{self.config['ollama']['host'].rstrip('/')}/api/generate",
                     json={
                         "model": self.config['ollama']['model'],
                         "prompt": prompt,
                         "stream": False
                     },
-                    timeout=60
+                    timeout=120
                 )
                 if response.status_code == 200:
                     return {
@@ -489,7 +510,7 @@ Provide a clear, concise answer based on the document. If the answer is not in t
                 else:
                     return {
                         'success': False,
-                        'error': 'Ollama request failed'
+                        'error': f'Ollama request failed: HTTP {response.status_code}'
                     }
             else:
                 return {
