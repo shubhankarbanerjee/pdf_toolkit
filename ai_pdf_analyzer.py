@@ -64,6 +64,12 @@ try:
 except ImportError:
     HAS_TESSERACT = False
 
+try:
+    import langdetect
+    HAS_LANGDETECT = True
+except ImportError:
+    HAS_LANGDETECT = False
+
 
 class AIConfigManager:
     """Manage AI provider configurations and API keys."""
@@ -171,9 +177,8 @@ class PDFTextExtractor:
     
     @staticmethod
     def _extract_text_direct(pdf_path: str, max_pages: int = None) -> str:
-        """Extract text directly from PDF using PyMuPDF or PyPDF2."""
+        """Extract text directly from PDF using PyMuPDF or PyPDF2 (no character limit)."""
         text = ""
-        max_chars = 500000  # ~125K tokens at 4 chars/token
         page_count = 0
         
         # Try PyMuPDF first (faster)
@@ -188,11 +193,6 @@ class PDFTextExtractor:
                     pages_to_extract = min(pages_to_extract, max_pages)
                 
                 for page_num in range(pages_to_extract):
-                    # Check character limit
-                    if len(text) >= max_chars:
-                        text += f"\n\n[... PDF truncated at {max_chars} characters - extracted {page_num} of {page_count} pages ...]"
-                        break
-                    
                     try:
                         page = doc[page_num]
                         text += f"\n--- Page {page_num + 1} ---\n"
@@ -219,11 +219,6 @@ class PDFTextExtractor:
                         pages_to_extract = min(pages_to_extract, max_pages)
                     
                     for page_num in range(pages_to_extract):
-                        # Check character limit
-                        if len(text) >= max_chars:
-                            text += f"\n\n[... PDF truncated at {max_chars} characters - extracted {page_num} of {page_count} pages ...]"
-                            break
-                        
                         try:
                             page = reader.pages[page_num]
                             text += f"\n--- Page {page_num + 1} ---\n"
@@ -239,14 +234,22 @@ class PDFTextExtractor:
         return ""
     
     @staticmethod
-    def _extract_text_ocr(pdf_path: str, max_pages: int = None) -> str:
-        """Extract text from scanned PDF using OCR (Tesseract)."""
+    def _extract_text_ocr(pdf_path: str, max_pages: int = None, languages: str = None) -> str:
+        """Extract text from scanned PDF using OCR (Tesseract) with multi-language support.
+        
+        Args:
+            pdf_path: Path to PDF
+            max_pages: Max pages to process
+            languages: Comma-separated language codes (e.g., 'eng,hin,mar' for English, Hindi, Marathi)
+        """
         if not HAS_PIL or not HAS_TESSERACT:
             print(f"[WARNING] OCR not available: PIL={HAS_PIL}, Tesseract={HAS_TESSERACT}")
             return ""
         
+        if not languages:
+            languages = "eng"  # Default to English
+        
         text = ""
-        max_chars = 500000
         page_count = 0
         
         try:
@@ -260,25 +263,54 @@ class PDFTextExtractor:
                 pages_to_extract = min(pages_to_extract, max_pages)
             
             for page_num in range(pages_to_extract):
-                if len(text) >= max_chars:
-                    text += f"\n\n[... PDF truncated at {max_chars} characters - OCR'd {page_num} of {page_count} pages ...]"
-                    break
-                
                 try:
                     page_image = pages[page_num]
                     text += f"\n--- Page {page_num + 1} (OCR) ---\n"
-                    text += pytesseract.image_to_string(page_image)
+                    text += pytesseract.image_to_string(page_image, lang=languages)
                 except Exception as e:
                     text += f"\n[Error OCR reading page {page_num + 1}: {str(e)}]\n"
             
-            print(f"[OK] OCR extracted {len(text)} characters from PDF ({page_count} pages)")
+            print(f"[OK] OCR extracted {len(text)} characters from PDF ({page_count} pages) with languages: {languages}")
             return text
         except Exception as e:
             print(f"[WARNING] OCR extraction failed: {e}")
             return ""
     
     @staticmethod
-    def _get_page_count(pdf_path: str) -> int:
+    def detect_language(text: str) -> str:
+        """Detect primary language in text and return Tesseract language codes.
+        
+        Supports: English, Hindi, Nepali, Marathi, Tamil, Malayalam, Sanskrit, Bengali, Chinese, Korean, Japanese
+        """
+        if not HAS_LANGDETECT:
+            return "eng"  # Default to English
+        
+        try:
+            # Language code mapping: ISO639-1 -> Tesseract codes
+            language_map = {
+                'en': 'eng',
+                'hi': 'hin',
+                'ne': 'nep',
+                'mr': 'mar',
+                'ta': 'tam',
+                'ml': 'mal',
+                'sa': 'san',
+                'bn': 'ben',
+                'zh-cn': 'chi_sim',
+                'zh-tw': 'chi_tra',
+                'zh': 'chi_sim',
+                'ko': 'kor',
+                'ja': 'jpn',
+            }
+            
+            # Get primary language from first 1000 chars
+            detected = langdetect.detect(text[:1000])
+            tesseract_lang = language_map.get(detected, 'eng')
+            print(f"[INFO] Detected language: {detected} -> Tesseract: {tesseract_lang}")
+            return tesseract_lang
+        except Exception as e:
+            print(f"[WARNING] Language detection failed: {e}")
+            return "eng"
         """Get number of pages in PDF."""
         try:
             if HAS_FITZ:
@@ -617,11 +649,11 @@ class AIPDFAnalyzer:
                 }
             provider = available[0]
         
-        # Generate analysis
+        # Generate analysis with full document text (no character limit)
         prompt = f"""
 Analyze the following document and provide a comprehensive summary:
 
-{text[:4000]}  # Limit to first 4000 chars for token limit
+{text}
 
 Provide:
 1. **Main Topic**: What is this document about?
@@ -816,9 +848,9 @@ Keep the summary concise and well-structured.
                 }
             provider = available[0]
         
-        # Use full document text for better analysis (increased from 3000 to 8000 chars)
-        # For large documents, provide full text to maintain context
-        doc_context = context_text[:8000] if len(context_text) > 8000 else context_text
+        # Use full document text for better analysis (no character limit)
+        # For large documents, provide complete text to maintain context
+        doc_context = context_text
         
         prompt = f"""
 You are a helpful assistant analyzing a document. Answer the user's question based on the document content provided.

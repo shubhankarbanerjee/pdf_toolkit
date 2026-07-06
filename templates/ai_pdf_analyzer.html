@@ -222,17 +222,20 @@
 
         .chat-messages {
             flex: 1;
-            overflow-y: auto;
+            overflow-y: scroll !important;
+            overflow-x: hidden;
             padding: 20px;
             display: flex;
             flex-direction: column;
+            justify-content: flex-end;
             gap: 15px;
             scrollbar-width: thin;
-            scrollbar-color: #ccc #f5f5f5;
+            scrollbar-color: #999 #f5f5f5;
+            min-height: 0;
         }
         
         .chat-messages::-webkit-scrollbar {
-            width: 8px;
+            width: 10px;
         }
         
         .chat-messages::-webkit-scrollbar-track {
@@ -241,12 +244,12 @@
         }
         
         .chat-messages::-webkit-scrollbar-thumb {
-            background: #ccc;
+            background: #999;
             border-radius: 10px;
         }
         
         .chat-messages::-webkit-scrollbar-thumb:hover {
-            background: #999;
+            background: #667eea;
         }
 
         .message {

@@ -262,6 +262,14 @@ class DatabaseManager:
                 ''', (session_id, limit))
                 return [dict(row) for row in cursor.fetchall()]
     
+    def delete_chat_history(self, session_id):
+        """Delete all chat history for a session (keep PDFs intact)."""
+        with self.lock:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM chat_history WHERE session_id = ?', (session_id,))
+                conn.commit()
+    
     def cleanup_old_sessions(self, hours=24):
         """Delete sessions older than specified hours"""
         with self.lock:

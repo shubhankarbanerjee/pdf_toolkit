@@ -25,22 +25,39 @@ function initializeSession() {
 }
 
 function createNewSession() {
-    fetch('/create_session', {
-        method: 'POST'
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            sessionId = data.session_id;
-            localStorage.setItem('pdfAnalyzerSessionId', sessionId);
-            updateSessionDisplay();
-            showStatus('success', 'New session created');
-            refreshFileList();
-        } else {
-            showStatus('error', data.error || 'Failed to create session');
-        }
-    })
-    .catch(err => showStatus('error', err.message));
+    // Keep same session but clear chat history
+    if (!sessionId) {
+        // If no session exists, create one
+        fetch('/create_session', {
+            method: 'POST'
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                sessionId = data.session_id;
+                localStorage.setItem('pdfAnalyzerSessionId', sessionId);
+                updateSessionDisplay();
+                showStatus('success', 'Session created');
+            }
+        })
+        .catch(err => showStatus('error', err.message));
+    } else {
+        // Clear chat history for existing session (keep PDFs)
+        fetch(`/clear_chat/${sessionId}`, {
+            method: 'POST'
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('chatMessages').innerHTML = '';
+                document.getElementById('summarySection').style.display = 'none';
+                document.getElementById('emptyPlaceholder').style.display = 'flex';
+                document.getElementById('chatContainer').style.display = 'none';
+                showStatus('success', 'Chat cleared - PDFs retained');
+            }
+        })
+        .catch(err => showStatus('error', err.message));
+    }
 }
 
 function loadSessionInfo() {
@@ -301,6 +318,15 @@ function analyzePDF() {
             document.getElementById('chatMessages').innerHTML = '';
             document.getElementById('messageInput').disabled = false;
             document.getElementById('sendBtn').disabled = false;
+            
+            // Generate dynamic title from file names and summary
+            const summary = data.summary || '';
+            const subjectMatch = summary.match(/[^.!?]*[.!?]/);
+            const subject = subjectMatch ? subjectMatch[0].substring(0, 70).trim() : 'Analysis';
+            const chatTitle = numFiles > 1 
+                ? `📄 ${numFiles} Files: ${subject}` 
+                : `📄 ${subject}`;
+            document.getElementById('chatTitle').textContent = chatTitle.substring(0, 120);
             
             const fileInfo = numFiles > 1 ? `${numFiles} PDFs analyzed` : `${data.pages || '?'} pages, ${formatBytes(data.file_size)}`;
             showStatus('success', `Analysis complete (${fileInfo})`);

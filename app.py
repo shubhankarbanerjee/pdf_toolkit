@@ -530,6 +530,20 @@ def create_session_route():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/clear_chat/<session_id>', methods=['POST'])
+def clear_chat(session_id):
+    """Clear chat history for a session (keep PDFs intact)."""
+    if not HAS_DB:
+        return jsonify({'success': False, 'error': 'Database not available'}), 400
+    
+    try:
+        db_manager.delete_chat_history(session_id)
+        return jsonify({'success': True, 'message': 'Chat history cleared'})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/get_session_info/<session_id>', methods=['GET'])
 def get_session_info(session_id):
     """Get session information and stats."""
