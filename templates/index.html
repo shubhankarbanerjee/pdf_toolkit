@@ -742,6 +742,28 @@
                     <span>Open AI Analyzer</span>
                 </a>
             </div>
+
+            <!-- PDF Diff -->
+            <div class="tool-card" id="diff-tool" style="border: 2px solid #1e3a5f; background: linear-gradient(135deg, rgba(30,58,95,0.05) 0%, rgba(45,106,159,0.05) 100%);">
+                <h3>📄↔📄 PDF Diff</h3>
+                <p class="description">Compare two PDFs side-by-side. Highlights text changes, spelling differences, and image differences. Ignores compression and quality changes.</p>
+
+                <div style="margin-top: 1rem; padding: 1rem; background: white; border-radius: 8px; border: 1px solid #ddd;">
+                    <p style="font-size: 0.875rem; margin-bottom: 0.75rem; color: #666;">
+                        <strong>Features:</strong>
+                    </p>
+                    <ul style="font-size: 0.875rem; margin-left: 1.5rem; color: #666; line-height: 1.6;">
+                        <li>Word-level text differences (spelling, edits)</li>
+                        <li>Image comparison using perceptual hashing</li>
+                        <li>Compressed PDF = no differences vs original</li>
+                        <li>Per-page diff view with inline highlighting</li>
+                    </ul>
+                </div>
+
+                <a href="/diff" class="btn btn-primary" style="display: block; margin-top: 1rem; text-decoration: none; text-align: center; background: #1e3a5f;">
+                    <span>Open PDF Diff</span>
+                </a>
+            </div>
         </div>
     </main>
 

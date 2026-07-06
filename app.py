@@ -25,6 +25,14 @@ from pdf_processor import (
     arrange_photos_on_a4_row
 )
 
+# Import PDF Differ
+try:
+    from pdf_diff import PDFDiffer
+    HAS_PDF_DIFF = True
+except ImportError as e:
+    print(f"[WARNING] PDF Diff not available: {e}")
+    HAS_PDF_DIFF = False
+
 # Import AI PDF Analyzer
 try:
     from ai_pdf_analyzer import AIPDFAnalyzer, AIConfigManager, PDFTextExtractor
@@ -443,6 +451,63 @@ def ai_analyzer_page():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# PDF DIFF ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/diff')
+def diff_page():
+    """Render PDF Diff page."""
+    return render_template('pdf_diff.html')
+
+
+@app.route('/api/diff', methods=['POST'])
+def api_diff():
+    """Compare two PDF files and return structured diff result."""
+    if not HAS_PDF_DIFF:
+        return jsonify({'success': False, 'error': 'PDF Diff module not available'}), 400
+
+    try:
+        if 'file1' not in request.files or 'file2' not in request.files:
+            return jsonify({'success': False, 'error': 'Two PDF files are required'}), 400
+
+        file1 = request.files['file1']
+        file2 = request.files['file2']
+
+        if not file1.filename or not file2.filename:
+            return jsonify({'success': False, 'error': 'Both files must be selected'}), 400
+
+        allowed = {'pdf', 'txt'}
+        for f in (file1, file2):
+            ext = f.filename.rsplit('.', 1)[-1].lower() if '.' in f.filename else ''
+            if ext not in allowed:
+                return jsonify({'success': False, 'error': f'Only PDF and TXT files are supported (got .{ext})'}), 400
+
+        uid1 = str(uuid.uuid4())
+        uid2 = str(uuid.uuid4())
+        path1 = os.path.join(app.config['UPLOAD_FOLDER'], f"{uid1}_{secure_filename(file1.filename)}")
+        path2 = os.path.join(app.config['UPLOAD_FOLDER'], f"{uid2}_{secure_filename(file2.filename)}")
+
+        file1.save(path1)
+        file2.save(path2)
+
+        try:
+            result = PDFDiffer.diff(path1, path2)
+            result['file1_name'] = file1.filename
+            result['file2_name'] = file2.filename
+            return jsonify(result)
+        finally:
+            for p in (path1, path2):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # SESSION MANAGEMENT ROUTES
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -796,7 +861,7 @@ def get_chat_history(file_id):
 
 @app.route('/test_ollama', methods=['POST'])
 def test_ollama():
-    """Test Ollama connection at a given host URL."""
+    """Test Ollama/Msty connection - tries multiple endpoint variants."""
     if not HAS_AI_ANALYZER:
         return jsonify({'success': False, 'error': 'AI analyzer not available'}), 400
     
@@ -807,27 +872,52 @@ def test_ollama():
             return jsonify({'success': False, 'error': 'Host URL required'}), 400
         
         import requests as req
-        try:
-            resp = req.get(f"{host}/api/tags", timeout=5)
-            if resp.status_code == 200:
-                tags_data = resp.json()
-                models = [m.get('name', '') for m in tags_data.get('models', [])]
-                return jsonify({
-                    'success': True,
-                    'message': f'Connected to Ollama at {host}',
-                    'models': models
-                })
-            else:
-                return jsonify({
-                    'success': False,
-                    'error': f'Ollama responded with HTTP {resp.status_code}'
-                })
-        except req.exceptions.ConnectionError:
-            return jsonify({'success': False, 'error': f'Connection refused at {host} - check host and port'})
-        except req.exceptions.Timeout:
-            return jsonify({'success': False, 'error': f'Connection timed out at {host}'})
-        except Exception as e:
-            return jsonify({'success': False, 'error': str(e)})
+        
+        # Try endpoints in order: native Ollama, then Msty/OpenAI-compatible
+        endpoints_to_try = [
+            ('GET', f'{host}/api/tags',  'Ollama native API'),
+            ('GET', f'{host}/v1/models', 'OpenAI-compatible API (Msty)'),
+        ]
+        
+        for method, url, api_type in endpoints_to_try:
+            try:
+                resp = req.request(method, url, timeout=5)
+                if resp.status_code == 200:
+                    models = []
+                    try:
+                        resp_data = resp.json()
+                        raw = resp_data.get('models', [])
+                        # Ollama native: [{name: ...}]  OpenAI-compat: [{id: ...}]
+                        models = [m.get('name') or m.get('id', '') for m in raw if isinstance(m, dict)]
+                    except Exception:
+                        pass
+                    return jsonify({
+                        'success': True,
+                        'message': f'Connected via {api_type} at {host}',
+                        'api_type': api_type,
+                        'models': [m for m in models if m]
+                    })
+            except req.exceptions.ConnectionError:
+                continue  # try next endpoint variant
+            except req.exceptions.Timeout:
+                return jsonify({'success': False, 'error': f'Connection timed out at {host} - host reachable but slow'})
+            except Exception:
+                continue
+        
+        # All endpoints failed
+        return jsonify({
+            'success': False,
+            'error': (
+                f'Cannot connect to {host}. '
+                'Check: (1) correct host/port, '
+                '(2) Msty/Ollama is running on remote machine, '
+                '(3) firewall allows the port, '
+                '(4) Msty "Network Access" is enabled in its settings.'
+            )
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
     
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
