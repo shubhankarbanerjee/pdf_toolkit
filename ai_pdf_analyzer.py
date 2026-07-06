@@ -495,11 +495,15 @@ Keep the summary concise and well-structured.
         host = self.config['ollama']['host'].rstrip('/')
         model = self.ollama_model
         
+        print(f"[DEBUG] Starting PDF analysis with model: {model} at {host}")
+        
         try:
             # Try native Ollama endpoint first
             try:
+                url = f"{host}/api/generate"
+                print(f"[DEBUG] Trying native Ollama endpoint: POST {url}")
                 response = requests.post(
-                    f"{host}/api/generate",
+                    url,
                     json={
                         "model": model,
                         "prompt": prompt,
@@ -509,8 +513,11 @@ Keep the summary concise and well-structured.
                     timeout=120
                 )
                 
+                print(f"[DEBUG] Response status: {response.status_code}")
+                
                 if response.status_code == 200:
                     result = response.json()
+                    print(f"[OK] Ollama analysis succeeded")
                     return {
                         'success': True,
                         'provider': 'ollama',
@@ -518,20 +525,32 @@ Keep the summary concise and well-structured.
                         'summary': result.get('response', ''),
                         'timestamp': datetime.now().isoformat()
                     }
-                elif response.status_code == 404:
-                    # Endpoint not found - try Msty OpenAI-compatible endpoint
+                elif response.status_code in [404, 405]:
+                    # Endpoint not found or method not allowed - try Msty OpenAI-compatible endpoint
+                    print(f"[DEBUG] Native endpoint returned {response.status_code}, trying Msty fallback...")
                     pass
                 else:
+                    error_body = response.text[:500] if response.text else "No response body"
+                    print(f"[WARNING] Native endpoint error: HTTP {response.status_code} - {error_body}")
                     return {
                         'success': False,
-                        'error': f'Ollama error: HTTP {response.status_code}'
+                        'error': f'Ollama error: HTTP {response.status_code} - {error_body[:100]}'
                     }
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-                pass  # Try fallback endpoint
+            except requests.exceptions.ConnectionError as e:
+                print(f"[WARNING] Connection error on native endpoint: {e}")
+                print(f"[DEBUG] Trying Msty fallback...")
+            except requests.exceptions.Timeout as e:
+                print(f"[WARNING] Timeout on native endpoint: {e}")
+                print(f"[DEBUG] Trying Msty fallback...")
+            except Exception as e:
+                print(f"[WARNING] Exception on native endpoint: {e}")
+                print(f"[DEBUG] Trying Msty fallback...")
             
             # Fallback to Msty's OpenAI-compatible endpoint
+            url_fallback = f"{host}/v1/chat/completions"
+            print(f"[DEBUG] Trying Msty endpoint: POST {url_fallback}")
             response = requests.post(
-                f"{host}/v1/chat/completions",
+                url_fallback,
                 json={
                     "model": model,
                     "messages": [
@@ -544,9 +563,12 @@ Keep the summary concise and well-structured.
                 timeout=120
             )
             
+            print(f"[DEBUG] Msty response status: {response.status_code}")
+            
             if response.status_code == 200:
                 result = response.json()
                 message_content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+                print(f"[OK] Msty analysis succeeded")
                 return {
                     'success': True,
                     'provider': 'ollama (Msty)',
@@ -555,14 +577,18 @@ Keep the summary concise and well-structured.
                     'timestamp': datetime.now().isoformat()
                 }
             else:
+                error_body = response.text[:500] if response.text else "No response body"
+                print(f"[ERROR] Msty endpoint returned HTTP {response.status_code}: {error_body}")
                 return {
                     'success': False,
-                    'error': f'Msty error: HTTP {response.status_code} - check model availability'
+                    'error': f'Msty error: HTTP {response.status_code} - {error_body[:100]}'
                 }
         except Exception as e:
+            error_msg = str(e)
+            print(f"[ERROR] Unexpected exception in Ollama analysis: {error_msg}")
             return {
                 'success': False,
-                'error': f'Ollama analysis failed: {str(e)}'
+                'error': f'Ollama analysis failed: {error_msg}'
             }
     
     def chat_with_context(self, message: str, context_text: str, provider: Optional[str] = None) -> Dict[str, Any]:
