@@ -25,6 +25,14 @@ from pdf_processor import (
     arrange_photos_on_a4_row
 )
 
+# Import AI PDF Analyzer
+try:
+    from ai_pdf_analyzer import AIPDFAnalyzer, AIConfigManager
+    HAS_AI_ANALYZER = True
+except ImportError as e:
+    print(f"[WARNING] AI PDF Analyzer not available: {e}")
+    HAS_AI_ANALYZER = False
+
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -33,6 +41,14 @@ app.config['OUTPUT_FOLDER'] = 'outputs'
 # Create necessary directories
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
+
+# Initialize AI Analyzer
+ai_analyzer = None
+if HAS_AI_ANALYZER:
+    ai_analyzer = AIPDFAnalyzer()
+
+# Track uploaded files for AI analysis
+ai_uploaded_files = {}
 
 # Allowed extensions
 ALLOWED_PDF_EXTENSIONS = {'pdf'}
@@ -400,6 +416,178 @@ def cleanup():
         return jsonify({'success': True, 'cleaned_files': cleaned})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AI PDF ANALYZER ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/ai_analyzer')
+def ai_analyzer_page():
+    """Render AI PDF Analyzer page."""
+    return render_template('ai_pdf_analyzer.html')
+
+
+@app.route('/upload_pdf', methods=['POST'])
+def upload_pdf():
+    """Upload PDF/image for AI analysis."""
+    if not HAS_AI_ANALYZER:
+        return jsonify({'success': False, 'error': 'AI analyzer not available'}), 400
+    
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if not file.filename:
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+        
+        # Accept PDF, images, and text files
+        allowed_types = {'pdf', 'jpg', 'jpeg', 'png', 'txt', 'gif', 'bmp', 'webp'}
+        file_ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+        
+        if file_ext not in allowed_types:
+            return jsonify({'success': False, 'error': f'File type .{file_ext} not supported'}), 400
+        
+        # Save file
+        filename = secure_filename(file.filename)
+        unique_filename = f"{uuid.uuid4()}_{filename}"
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+        file.save(file_path)
+        
+        # Track file
+        ai_uploaded_files[unique_filename] = {
+            'original_name': filename,
+            'path': file_path,
+            'size': os.path.getsize(file_path),
+            'type': file.content_type
+        }
+        
+        return jsonify({
+            'success': True,
+            'filename': unique_filename,
+            'original_name': filename
+        })
+    
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/analyze_pdf', methods=['POST'])
+def analyze_pdf():
+    """Analyze PDF and generate summary."""
+    if not HAS_AI_ANALYZER:
+        return jsonify({'success': False, 'error': 'AI analyzer not available'}), 400
+    
+    try:
+        data = request.get_json()
+        filename = data.get('filename')
+        provider = data.get('provider', 'gemini')
+        
+        if not filename or filename not in ai_uploaded_files:
+            return jsonify({'success': False, 'error': 'File not found'}), 400
+        
+        file_path = ai_uploaded_files[filename]['path']
+        
+        # Analyze PDF
+        result = ai_analyzer.analyze_pdf(file_path, provider)
+        
+        if not result.get('success'):
+            return jsonify({
+                'success': False,
+                'error': result.get('error', 'Analysis failed')
+            }), 500
+        
+        return jsonify({
+            'success': True,
+            'summary': result['summary'],
+            'provider': result['provider'],
+            'context': ''  # Store context server-side per filename
+        })
+    
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/chat_pdf', methods=['POST'])
+def chat_pdf():
+    """Chat with AI about PDF content."""
+    if not HAS_AI_ANALYZER:
+        return jsonify({'success': False, 'error': 'AI analyzer not available'}), 400
+    
+    try:
+        data = request.get_json()
+        filename = data.get('filename')
+        message = data.get('message')
+        provider = data.get('provider', 'gemini')
+        
+        if not filename or filename not in ai_uploaded_files:
+            return jsonify({'success': False, 'error': 'File not found'}), 400
+        
+        if not message:
+            return jsonify({'success': False, 'error': 'No message provided'}), 400
+        
+        file_path = ai_uploaded_files[filename]['path']
+        
+        # Extract context from PDF
+        from ai_pdf_analyzer import PDFTextExtractor
+        context = PDFTextExtractor.extract_text(file_path, max_pages=50)
+        
+        # Chat with context
+        result = ai_analyzer.chat_with_context(message, context, provider)
+        
+        if not result.get('success'):
+            return jsonify({
+                'success': False,
+                'error': result.get('error', 'Chat failed')
+            }), 500
+        
+        return jsonify({
+            'success': True,
+            'response': result['response'],
+            'provider': result['provider']
+        })
+    
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/get_ai_config', methods=['GET'])
+def get_ai_config():
+    """Get current AI configuration."""
+    if not HAS_AI_ANALYZER:
+        return jsonify({'error': 'AI analyzer not available'}), 400
+    
+    try:
+        config = ai_analyzer.config_manager.get_config()
+        return jsonify(config)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/save_ai_config', methods=['POST'])
+def save_ai_config():
+    """Save AI configuration."""
+    if not HAS_AI_ANALYZER:
+        return jsonify({'success': False, 'error': 'AI analyzer not available'}), 400
+    
+    try:
+        config = request.get_json()
+        success = ai_analyzer.config_manager.save_config(config)
+        
+        if success:
+            # Reinitialize AI providers
+            ai_analyzer._init_providers()
+            return jsonify({'success': True})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to save configuration'}), 500
+    
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 if __name__ == '__main__':

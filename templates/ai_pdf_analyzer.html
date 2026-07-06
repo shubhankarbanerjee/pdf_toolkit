@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI PDF Analyzer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+            flex-direction: column;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .settings-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .settings-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .main-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 320px;
+            background: white;
+            border-right: 1px solid #ddd;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .upload-area {
+            border: 2px dashed #667eea;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .upload-area:hover {
+            background: #f0f4ff;
+            border-color: #764ba2;
+        }
+
+        .upload-area.dragover {
+            background: #f0f4ff;
+            border-color: #764ba2;
+        }
+
+        .upload-area p {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .file-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .file-item {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .file-item:hover {
+            background: #f8f9fa;
+            border-color: #667eea;
+            box-shadow: 0 2px 4px rgba(102,126,234,0.1);
+        }
+
+        .file-item.active {
+            background: #f0f4ff;
+            border-color: #667eea;
+            font-weight: 600;
+        }
+
+        .file-name {
+            font-size: 13px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .file-size {
+            font-size: 11px;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        .remove-btn {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #ff4444;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            display: none;
+            font-size: 12px;
+            line-height: 20px;
+            text-align: center;
+        }
+
+        .file-item:hover .remove-btn {
+            display: block;
+        }
+
+        .chat-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            padding: 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .chat-header h2 {
+            font-size: 18px;
+            margin-bottom: 8px;
+        }
+
+        .chat-provider {
+            display: flex;
+            gap: 20px;
+            font-size: 13px;
+        }
+
+        .chat-provider label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+        }
+
+        .chat-provider input[type="radio"] {
+            cursor: pointer;
+        }
+
+        .summary-section {
+            padding: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            background: #f0f4ff;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .summary-title {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .summary-content {
+            font-size: 13px;
+            line-height: 1.6;
+            color: #555;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            display: flex;
+            gap: 10px;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message-bubble {
+            max-width: 70%;
+            padding: 12px 15px;
+            border-radius: 10px;
+            font-size: 13px;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-bubble {
+            background: #667eea;
+            color: white;
+        }
+
+        .message.ai .message-bubble {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .chat-input-area {
+            padding: 15px;
+            border-top: 1px solid #ddd;
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input {
+            flex: 1;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 10px 12px;
+            font-size: 13px;
+            resize: none;
+            max-height: 100px;
+            font-family: inherit;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102,126,234,0.1);
+        }
+
+        .send-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.3s;
+            align-self: flex-end;
+        }
+
+        .send-btn:hover {
+            background: #764ba2;
+        }
+
+        .send-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .analyze-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 10px 16px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            width: 100%;
+            margin-top: 10px;
+            transition: all 0.3s;
+        }
+
+        .analyze-btn:hover {
+            background: #218838;
+        }
+
+        .analyze-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #999;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+
+        .modal-header {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+
+        .modal-section {
+            margin-bottom: 25px;
+            padding-bottom: 25px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .modal-section:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 12px;
+        }
+
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            margin-bottom: 6px;
+            color: #555;
+        }
+
+        .form-input {
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 8px 10px;
+            font-size: 12px;
+            font-family: monospace;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102,126,234,0.1);
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            cursor: pointer;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+
+        .btn {
+            border: none;
+            border-radius: 4px;
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #764ba2;
+        }
+
+        .btn-secondary {
+            background: #ddd;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #ccc;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #667eea;
+            border-radius: 50%;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 1; }
+        }
+
+        .status-message {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-size: 12px;
+        }
+
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🤖 AI PDF Analyzer</h1>
+            <button class="settings-btn" onclick="openSettings()">Settings</button>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Sidebar: File List -->
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <div class="upload-area" id="uploadArea" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+                        <div style="font-size: 24px;">📄</div>
+                        <p>Click or drag PDF/images here</p>
+                    </div>
+                    <input type="file" id="fileInput" style="display: none;" accept=".pdf,.jpg,.jpeg,.png,.txt" onchange="handleFileSelect(event)">
+                    <button class="analyze-btn" id="analyzeBtn" onclick="analyzePDF()" disabled>Analyze PDF</button>
+                </div>
+
+                <div class="file-list" id="fileList">
+                    <div style="color: #999; text-align: center; padding: 20px; font-size: 12px;">
+                        No files uploaded yet
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Panel -->
+            <div class="chat-panel">
+                <div class="chat-header">
+                    <h2 id="chatTitle">Select a PDF to analyze</h2>
+                    <div class="chat-provider">
+                        <label>
+                            <input type="radio" name="provider" value="gemini" checked> Gemini
+                        </label>
+                        <label>
+                            <input type="radio" name="provider" value="openai"> OpenAI
+                        </label>
+                        <label>
+                            <input type="radio" name="provider" value="ollama"> Ollama
+                        </label>
+                    </div>
+                </div>
+
+                <div id="summarySection" style="display: none;">
+                    <div class="summary-section">
+                        <div class="summary-title">Document Summary</div>
+                        <div class="summary-content" id="summaryContent"></div>
+                    </div>
+                </div>
+
+                <div id="chatContainer" style="display: none; flex: 1; display: flex; flex-direction: column;">
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">💬</div>
+                            <p>Ask questions about the PDF</p>
+                        </div>
+                    </div>
+
+                    <div class="chat-input-area">
+                        <textarea class="chat-input" id="messageInput" placeholder="Ask a question about the PDF..." rows="1"></textarea>
+                        <button class="send-btn" id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+                    </div>
+                </div>
+
+                <div id="emptyPlaceholder" style="flex: 1; display: flex; align-items: center; justify-content: center; color: #999;">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📋</div>
+                        <p>Upload a PDF to get started</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">AI Configuration</div>
+
+            <!-- Gemini -->
+            <div class="modal-section">
+                <div class="section-title">Google Gemini</div>
+                <div class="form-group">
+                    <label class="form-label">API Key</label>
+                    <input type="password" id="geminiKey" class="form-input" placeholder="Enter Gemini API key">
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-group">
+                        <input type="checkbox" id="geminiEnabled">
+                        <span>Enable Gemini</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- OpenAI -->
+            <div class="modal-section">
+                <div class="section-title">OpenAI</div>
+                <div class="form-group">
+                    <label class="form-label">API Key</label>
+                    <input type="password" id="openaiKey" class="form-input" placeholder="Enter OpenAI API key">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Model</label>
+                    <input type="text" id="openaiModel" class="form-input" placeholder="gpt-4-turbo" value="gpt-4-turbo">
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-group">
+                        <input type="checkbox" id="openaiEnabled">
+                        <span>Enable OpenAI</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Ollama -->
+            <div class="modal-section">
+                <div class="section-title">Local Ollama</div>
+                <div class="form-group">
+                    <label class="form-label">Host URL</label>
+                    <input type="text" id="ollamaHost" class="form-input" placeholder="http://localhost:11434" value="http://localhost:11434">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Model</label>
+                    <input type="text" id="ollamaModel" class="form-input" placeholder="llama2" value="llama2">
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-group">
+                        <input type="checkbox" id="ollamaEnabled">
+                        <span>Enable Ollama</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Buttons -->
+            <div class="modal-buttons">
+                <button class="btn btn-secondary" onclick="closeSettings()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/ai_pdf_analyzer.js"></script>
+</body>
+</html>
