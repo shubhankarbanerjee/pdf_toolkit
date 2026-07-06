@@ -547,7 +547,10 @@
         <!-- Header -->
         <div class="header">
             <h1>🤖 AI PDF Analyzer</h1>
-            <button class="settings-btn" onclick="openSettings()">Settings</button>
+            <div style="display: flex; gap: 10px;">
+                <button class="settings-btn" onclick="createNewSession()" title="Clear chat and start fresh">New Session</button>
+                <button class="settings-btn" onclick="openSettings()">Settings</button>
+            </div>
         </div>
 
         <!-- Main Content -->

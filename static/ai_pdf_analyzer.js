@@ -10,8 +10,29 @@ let currentContext = '';
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
-    initializeSession();
+    console.log('Initializing AI PDF Analyzer...');
+    checkDatabaseHealth();
+    setTimeout(initializeSession, 500);
 });
+
+// Check database health on startup
+function checkDatabaseHealth() {
+    fetch('/health')
+    .then(r => r.json())
+    .then(data => {
+        console.log('Health check:', data);
+        if (!data.modules.database) {
+            console.warn('Database module not available');
+            showStatus('warning', 'Database module not available - some features may not work');
+        } else if (!data.database_info.accessible) {
+            console.error('Database not accessible:', data.database_info.error);
+            showStatus('error', `Database Error: ${data.database_info.error}`);
+        } else {
+            console.log('Database is healthy');
+        }
+    })
+    .catch(err => console.warn('Health check failed:', err));
+}
 
 // Session Management
 function initializeSession() {
@@ -28,25 +49,46 @@ function createNewSession() {
     // Keep same session but clear chat history
     if (!sessionId) {
         // If no session exists, create one
+        const createBtn = event?.target || document.querySelector('button[onclick="createNewSession()"]');
+        if (createBtn) createBtn.disabled = true;
+        
         fetch('/create_session', {
             method: 'POST'
         })
-        .then(r => r.json())
+        .then(r => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+            return r.json();
+        })
         .then(data => {
             if (data.success) {
                 sessionId = data.session_id;
                 localStorage.setItem('pdfAnalyzerSessionId', sessionId);
                 updateSessionDisplay();
-                showStatus('success', 'Session created');
+                showStatus('success', `Session created: ${sessionId.substring(0, 8)}...`);
+            } else {
+                throw new Error(data.error || 'Failed to create session');
             }
         })
-        .catch(err => showStatus('error', err.message));
+        .catch(err => {
+            console.error('Session creation error:', err);
+            showStatus('error', `Session Error: ${err.message}`);
+            alert(`Failed to create session:\n${err.message}\n\nPlease check:\n1. Server is running\n2. Database is accessible`);
+        })
+        .finally(() => {
+            if (createBtn) createBtn.disabled = false;
+        });
     } else {
         // Clear chat history for existing session (keep PDFs)
+        const createBtn = event?.target || document.querySelector('button[onclick="createNewSession()"]');
+        if (createBtn) createBtn.disabled = true;
+        
         fetch(`/clear_chat/${sessionId}`, {
             method: 'POST'
         })
-        .then(r => r.json())
+        .then(r => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+            return r.json();
+        })
         .then(data => {
             if (data.success) {
                 document.getElementById('chatMessages').innerHTML = '';
@@ -54,15 +96,27 @@ function createNewSession() {
                 document.getElementById('emptyPlaceholder').style.display = 'flex';
                 document.getElementById('chatContainer').style.display = 'none';
                 showStatus('success', 'Chat cleared - PDFs retained');
+            } else {
+                throw new Error(data.error || 'Failed to clear chat');
             }
         })
-        .catch(err => showStatus('error', err.message));
+        .catch(err => {
+            console.error('Clear chat error:', err);
+            showStatus('error', `Clear Error: ${err.message}`);
+        })
+        .finally(() => {
+            if (createBtn) createBtn.disabled = false;
+        });
     }
 }
 
 function loadSessionInfo() {
+    console.log(`Loading session info for: ${sessionId}`);
     fetch(`/get_session_info/${sessionId}`)
-    .then(r => r.json())
+    .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+        return r.json();
+    })
     .then(data => {
         if (data.success) {
             uploadedFiles = {};
@@ -76,12 +130,16 @@ function loadSessionInfo() {
             });
             refreshFileList();
             updateSessionDisplay();
+            console.log(`Session loaded: ${data.pdfs.length} PDFs`);
         } else {
-            createNewSession();
+            throw new Error(data.error || 'Invalid session');
         }
     })
     .catch(err => {
-        console.error('Failed to load session:', err);
+        console.error('Session load failed:', err);
+        console.log('Creating new session...');
+        localStorage.removeItem('pdfAnalyzerSessionId');
+        sessionId = null;
         createNewSession();
     });
 }

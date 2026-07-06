@@ -67,7 +67,12 @@ if HAS_AI_ANALYZER:
 # Initialize Database Manager
 db_manager = None
 if HAS_DB:
-    db_manager = DatabaseManager()
+    try:
+        db_manager = DatabaseManager()
+        print(f"[OK] Database initialized: {db_manager.db_path}")
+    except Exception as e:
+        print(f"[ERROR] Database initialization failed: {e}")
+        HAS_DB = False
 
 # Track uploaded files for AI analysis (legacy, can be deprecated)
 ai_uploaded_files = {}
@@ -542,6 +547,39 @@ def clear_chat(session_id):
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Check application and database health."""
+    health = {
+        'status': 'ok',
+        'modules': {
+            'ai_analyzer': HAS_AI_ANALYZER,
+            'database': HAS_DB,
+            'pdf_diff': HAS_PDF_DIFF
+        },
+        'database_info': {}
+    }
+    
+    if HAS_DB:
+        try:
+            if db_manager:
+                health['database_info']['path'] = db_manager.db_path
+                health['database_info']['exists'] = os.path.exists(db_manager.db_path)
+                # Try to get database info
+                session = db_manager.get_session('test-health-check')
+                health['database_info']['accessible'] = True
+                health['database_info']['test_query'] = 'passed'
+            else:
+                health['database_info']['accessible'] = False
+                health['database_info']['error'] = 'db_manager is None'
+        except Exception as e:
+            health['database_info']['accessible'] = False
+            health['database_info']['error'] = str(e)
+            health['status'] = 'warning'
+    
+    return jsonify(health), 200 if health['status'] == 'ok' else 500
 
 
 @app.route('/get_session_info/<session_id>', methods=['GET'])
