@@ -251,8 +251,12 @@ class AIPDFAnalyzer:
                 print(f"[WARNING] OpenAI init failed: {e}")
         
         # Check Ollama
+        self.ollama_available = False
+        self.ollama_model = None
         if HAS_REQUESTS and self.config['ollama']['enabled']:
             self.ollama_available = self._check_ollama_connection()
+            if self.ollama_available:
+                self.ollama_model = self._get_best_ollama_model()
     
     def _check_ollama_connection(self) -> bool:
         """Test Ollama connection. Returns True if reachable."""
@@ -274,6 +278,91 @@ class AIPDFAnalyzer:
         except Exception as e:
             print(f"[WARNING] Ollama check failed: {e}")
         return False
+    
+    def _get_best_ollama_model(self) -> Optional[str]:
+        """Fetch available Ollama models and select the best one for PDF analysis."""
+        if not HAS_REQUESTS or not self.config['ollama']['enabled']:
+            return None
+        
+        host = self.config['ollama']['host'].rstrip('/')
+        
+        try:
+            # Try native Ollama endpoint first
+            resp = requests.get(f"{host}/api/tags", timeout=5)
+            if resp.status_code == 200:
+                models = resp.json().get('models', [])
+                if models:
+                    best_model = self._score_models(models, is_ollama=True)
+                    if best_model:
+                        print(f"[OK] Selected Ollama model: {best_model}")
+                        return best_model
+        except Exception:
+            pass
+        
+        try:
+            # Fallback to OpenAI-compatible endpoint (Msty)
+            resp = requests.get(f"{host}/v1/models", timeout=5)
+            if resp.status_code == 200:
+                models = resp.json().get('data', [])
+                if models:
+                    best_model = self._score_models(models, is_ollama=False)
+                    if best_model:
+                        print(f"[OK] Selected Msty model: {best_model}")
+                        return best_model
+        except Exception:
+            pass
+        
+        print("[WARNING] No Ollama models found - check remote instance")
+        return None
+    
+    def _score_models(self, models: List[Dict[str, Any]], is_ollama: bool = True) -> Optional[str]:
+        """Score and select the best model for PDF analysis.
+        
+        Scoring priorities:
+        1. Vision models (for PDFs with images)
+        2. Larger models (better quality)
+        3. Specific good models (llama, mistral, neural-chat)
+        """
+        scored = []
+        
+        for model in models:
+            name = model.get('name' if is_ollama else 'id', '')
+            if not name:
+                continue
+            
+            score = 0
+            name_lower = name.lower()
+            
+            # Vision models: highest priority for PDF analysis
+            if 'vision' in name_lower:
+                score += 100
+            
+            # Specific good models
+            if any(x in name_lower for x in ['llama3', 'mistral', 'neural-chat', 'yi', 'qwen']):
+                score += 50
+            
+            # Avoid very small models
+            if any(x in name_lower for x in ['0.5b', '1b', '2b']):
+                score -= 30
+            
+            # Prefer larger models (7b, 13b, 70b)
+            if '70b' in name_lower or '65b' in name_lower:
+                score += 40
+            elif '13b' in name_lower:
+                score += 20
+            elif '7b' in name_lower:
+                score += 10
+            
+            scored.append((name, score))
+        
+        if scored:
+            # Sort by score (descending) and return best
+            scored.sort(key=lambda x: x[1], reverse=True)
+            best_name, best_score = scored[0]
+            print(f"[OK] Model scores: {[(n, s) for n, s in scored[:3]]}")
+            return best_name
+        
+        return None
 
     def get_available_providers(self) -> List[str]:
         """Get list of enabled and available providers."""
@@ -397,8 +486,14 @@ Keep the summary concise and well-structured.
     
     def _analyze_with_ollama(self, prompt: str, context: str) -> Dict[str, Any]:
         """Analyze using local Ollama or Msty (OpenAI-compatible mode)."""
+        if not self.ollama_model:
+            return {
+                'success': False,
+                'error': 'No Ollama models available - pull a model first'
+            }
+        
         host = self.config['ollama']['host'].rstrip('/')
-        model = self.config['ollama']['model']
+        model = self.ollama_model
         
         try:
             # Try native Ollama endpoint first
@@ -419,6 +514,7 @@ Keep the summary concise and well-structured.
                     return {
                         'success': True,
                         'provider': 'ollama',
+                        'model': model,
                         'summary': result.get('response', ''),
                         'timestamp': datetime.now().isoformat()
                     }
@@ -454,13 +550,14 @@ Keep the summary concise and well-structured.
                 return {
                     'success': True,
                     'provider': 'ollama (Msty)',
+                    'model': model,
                     'summary': message_content,
                     'timestamp': datetime.now().isoformat()
                 }
             else:
                 return {
                     'success': False,
-                    'error': f'Msty error: HTTP {response.status_code} - check model name and endpoint availability'
+                    'error': f'Msty error: HTTP {response.status_code} - check model availability'
                 }
         except Exception as e:
             return {

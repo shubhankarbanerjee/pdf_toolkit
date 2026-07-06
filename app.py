@@ -875,27 +875,33 @@ def test_ollama():
         
         # Try endpoints in order: native Ollama, then Msty/OpenAI-compatible
         endpoints_to_try = [
-            ('GET', f'{host}/api/tags',  'Ollama native API'),
-            ('GET', f'{host}/v1/models', 'OpenAI-compatible API (Msty)'),
+            ('GET', f'{host}/api/tags',  'Ollama native API', 'models'),
+            ('GET', f'{host}/v1/models', 'OpenAI-compatible API (Msty)', 'data'),
         ]
         
-        for method, url, api_type in endpoints_to_try:
+        for method, url, api_type, key in endpoints_to_try:
             try:
                 resp = req.request(method, url, timeout=5)
                 if resp.status_code == 200:
                     models = []
                     try:
                         resp_data = resp.json()
-                        raw = resp_data.get('models', [])
+                        raw = resp_data.get(key, [])
                         # Ollama native: [{name: ...}]  OpenAI-compat: [{id: ...}]
                         models = [m.get('name') or m.get('id', '') for m in raw if isinstance(m, dict)]
                     except Exception:
                         pass
+                    
+                    models = [m for m in models if m]
+                    best_model = _score_models_for_api(models) if models else None
+                    
                     return jsonify({
                         'success': True,
                         'message': f'Connected via {api_type} at {host}',
                         'api_type': api_type,
-                        'models': [m for m in models if m]
+                        'models': models,
+                        'best_model': best_model,
+                        'best_model_info': f'Will auto-use "{best_model}" for analysis' if best_model else 'No models available'
                     })
             except req.exceptions.ConnectionError:
                 continue  # try next endpoint variant
@@ -918,9 +924,46 @@ def test_ollama():
     
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _score_models_for_api(models: list[str]) -> str:
+    """Score and select the best model for PDF analysis from a list of model names."""
+    scored = []
     
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+    for name in models:
+        if not name:
+            continue
+        
+        score = 0
+        name_lower = name.lower()
+        
+        # Vision models: highest priority for PDF analysis
+        if 'vision' in name_lower:
+            score += 100
+        
+        # Specific good models
+        if any(x in name_lower for x in ['llama3', 'mistral', 'neural-chat', 'yi', 'qwen']):
+            score += 50
+        
+        # Avoid very small models
+        if any(x in name_lower for x in ['0.5b', '1b', '2b']):
+            score -= 30
+        
+        # Prefer larger models (7b, 13b, 70b)
+        if '70b' in name_lower or '65b' in name_lower:
+            score += 40
+        elif '13b' in name_lower:
+            score += 20
+        elif '7b' in name_lower:
+            score += 10
+        
+        scored.append((name, score))
+    
+    if scored:
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[0][0]
+    
+    return models[0] if models else None
 
 
 @app.route('/get_ai_config', methods=['GET'])
