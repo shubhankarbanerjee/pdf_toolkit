@@ -311,6 +311,9 @@ class PDFTextExtractor:
         except Exception as e:
             print(f"[WARNING] Language detection failed: {e}")
             return "eng"
+    
+    @staticmethod
+    def _get_page_count(pdf_path: str) -> int:
         """Get number of pages in PDF."""
         try:
             if HAS_FITZ:
