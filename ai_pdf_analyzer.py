@@ -52,6 +52,18 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+
+try:
+    import pytesseract
+    HAS_TESSERACT = True
+except ImportError:
+    HAS_TESSERACT = False
+
 
 class AIConfigManager:
     """Manage AI provider configurations and API keys."""
@@ -119,18 +131,19 @@ class AIConfigManager:
 
 
 class PDFTextExtractor:
-    """Extract text from PDF files with caching support."""
+    """Extract text from PDF files with caching and OCR fallback support."""
     
     @staticmethod
-    def extract_text(pdf_path: str, max_pages: int = None, db_manager=None, file_id: str = None) -> str:
+    def extract_text(pdf_path: str, max_pages: int = None, db_manager=None, file_id: str = None, use_ocr: bool = False) -> str:
         """
-        Extract text from PDF file with optional caching.
+        Extract text from PDF file with optional caching and OCR fallback.
         
         Args:
             pdf_path: Path to PDF file
             max_pages: Maximum pages to extract (None = all)
             db_manager: Database manager for caching
             file_id: File ID for cache lookup
+            use_ocr: Force OCR for scanned PDFs
         
         Returns:
             Extracted text (up to 500K characters to stay within token limits)
@@ -141,9 +154,27 @@ class PDFTextExtractor:
             if cached:
                 return cached
         
+        # Try regular text extraction first
+        text = PDFTextExtractor._extract_text_direct(pdf_path, max_pages)
+        
+        # If extraction yielded very little text (scanned PDF), try OCR
+        if len(text.strip()) < 200 and use_ocr:
+            print(f"[INFO] PDF appears to be scanned (extracted {len(text)} chars), attempting OCR...")
+            text = PDFTextExtractor._extract_text_ocr(pdf_path, max_pages)
+        
+        # Cache the text
+        if db_manager and file_id and text:
+            page_count = PDFTextExtractor._get_page_count(pdf_path)
+            db_manager.cache_pdf_text(file_id, text, page_count)
+        
+        return text
+    
+    @staticmethod
+    def _extract_text_direct(pdf_path: str, max_pages: int = None) -> str:
+        """Extract text directly from PDF using PyMuPDF or PyPDF2."""
         text = ""
-        page_count = 0
         max_chars = 500000  # ~125K tokens at 4 chars/token
+        page_count = 0
         
         # Try PyMuPDF first (faster)
         if HAS_FITZ:
@@ -170,11 +201,7 @@ class PDFTextExtractor:
                         text += f"\n[Error reading page {page_num + 1}: {str(e)}]\n"
                 
                 doc.close()
-                
-                # Cache the text
-                if db_manager and file_id:
-                    db_manager.cache_pdf_text(file_id, text, page_count)
-                
+                print(f"[OK] Extracted {len(text)} characters from PDF (PyMuPDF)")
                 return text
             except Exception as e:
                 print(f"[WARNING] PyMuPDF extraction failed: {e}")
@@ -204,15 +231,73 @@ class PDFTextExtractor:
                         except Exception as e:
                             text += f"\n[Error reading page {page_num + 1}: {str(e)}]\n"
                 
-                # Cache the text
-                if db_manager and file_id:
-                    db_manager.cache_pdf_text(file_id, text, page_count)
-                
+                print(f"[OK] Extracted {len(text)} characters from PDF (PyPDF2)")
                 return text
             except Exception as e:
                 print(f"[WARNING] PyPDF2 extraction failed: {e}")
         
         return ""
+    
+    @staticmethod
+    def _extract_text_ocr(pdf_path: str, max_pages: int = None) -> str:
+        """Extract text from scanned PDF using OCR (Tesseract)."""
+        if not HAS_PIL or not HAS_TESSERACT:
+            print(f"[WARNING] OCR not available: PIL={HAS_PIL}, Tesseract={HAS_TESSERACT}")
+            return ""
+        
+        text = ""
+        max_chars = 500000
+        page_count = 0
+        
+        try:
+            import pdf2image
+            pages = pdf2image.convert_from_path(pdf_path)
+            page_count = len(pages)
+            
+            # Determine pages to extract
+            pages_to_extract = page_count
+            if max_pages:
+                pages_to_extract = min(pages_to_extract, max_pages)
+            
+            for page_num in range(pages_to_extract):
+                if len(text) >= max_chars:
+                    text += f"\n\n[... PDF truncated at {max_chars} characters - OCR'd {page_num} of {page_count} pages ...]"
+                    break
+                
+                try:
+                    page_image = pages[page_num]
+                    text += f"\n--- Page {page_num + 1} (OCR) ---\n"
+                    text += pytesseract.image_to_string(page_image)
+                except Exception as e:
+                    text += f"\n[Error OCR reading page {page_num + 1}: {str(e)}]\n"
+            
+            print(f"[OK] OCR extracted {len(text)} characters from PDF ({page_count} pages)")
+            return text
+        except Exception as e:
+            print(f"[WARNING] OCR extraction failed: {e}")
+            return ""
+    
+    @staticmethod
+    def _get_page_count(pdf_path: str) -> int:
+        """Get number of pages in PDF."""
+        try:
+            if HAS_FITZ:
+                doc = fitz.open(pdf_path)
+                count = len(doc)
+                doc.close()
+                return count
+        except Exception:
+            pass
+        
+        try:
+            if HAS_PYPDF2:
+                with open(pdf_path, 'rb') as f:
+                    reader = PyPDF2.PdfReader(f)
+                    return len(reader.pages)
+        except Exception:
+            pass
+        
+        return 0
     
     @staticmethod
     def get_file_hash(file_path: str) -> str:

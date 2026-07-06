@@ -712,7 +712,8 @@ def analyze_pdf():
             file_path,
             max_pages=None,  # No limit - unlimited
             db_manager=db_manager,
-            file_id=file_id
+            file_id=file_id,
+            use_ocr=True  # Enable OCR fallback for scanned PDFs
         )
         
         if not text_content:
