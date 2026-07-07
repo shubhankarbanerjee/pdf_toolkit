@@ -659,12 +659,12 @@ def upload_pdf():
         if not file.filename:
             return jsonify({'success': False, 'error': 'No file selected'}), 400
         
-        # Accept PDF, images, and text files
-        allowed_types = {'pdf', 'jpg', 'jpeg', 'png', 'txt', 'gif', 'bmp', 'webp'}
+        # Accept PDF and image files only
+        allowed_types = {'pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'}
         file_ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
         
         if file_ext not in allowed_types:
-            return jsonify({'success': False, 'error': f'File type .{file_ext} not supported'}), 400
+            return jsonify({'success': False, 'error': f'File type .{file_ext} not supported. Upload PDF or image files only.'}), 400
         
         # Save file
         filename = secure_filename(file.filename)
@@ -758,6 +758,15 @@ def analyze_pdf():
             return jsonify({'success': False, 'error': 'File does not belong to session'}), 403
         
         file_path = pdf_info['file_path']
+
+        original_name = (pdf_info.get('original_name') or '').lower()
+        source_name = original_name or str(file_path).lower()
+        supported_exts = ('.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp')
+        if not source_name.endswith(supported_exts):
+            return jsonify({
+                'success': False,
+                'error': 'Unsupported file type for AI analyzer. Please upload PDF or image files only.'
+            }), 400
         
         # Extract text with database caching
         text_content = PDFTextExtractor.extract_text(
@@ -832,6 +841,16 @@ def chat_pdf():
         if pdf_info['session_id'] != session_id:
             return jsonify({'success': False, 'error': 'File does not belong to session'}), 403
         
+        # Validate supported AI analyzer file types
+        original_name = (pdf_info.get('original_name') or '').lower()
+        source_name = original_name or str(pdf_info.get('file_path', '')).lower()
+        supported_exts = ('.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp')
+        if not source_name.endswith(supported_exts):
+            return jsonify({
+                'success': False,
+                'error': 'Unsupported file type for AI analyzer. Please upload PDF or image files only.'
+            }), 400
+
         # Get cached or extract PDF text
         text_content = db_manager.get_cached_text(file_id)
         if not text_content:
