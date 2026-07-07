@@ -257,10 +257,11 @@ function handleFileSelect(e) {
 
 function handleFiles(files) {
     for (let file of files) {
-        if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
+        const isTxt = file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt');
+        if (file.type === 'application/pdf' || file.type.startsWith('image/') || isTxt) {
             uploadFile(file);
         } else {
-            showStatus('error', 'Please upload PDF or image files only');
+            showStatus('error', 'Please upload PDF, image, or TXT files only');
         }
     }
 }
