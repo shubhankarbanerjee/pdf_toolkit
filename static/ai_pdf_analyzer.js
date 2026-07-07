@@ -160,7 +160,6 @@ function createNewSession() {
         .then(data => {
             if (data.success) {
                 document.getElementById('chatMessages').innerHTML = '';
-                document.getElementById('summarySection').style.display = 'none';
                 document.getElementById('emptyPlaceholder').style.display = 'flex';
                 document.getElementById('chatContainer').style.display = 'none';
                 showStatus('success', 'Chat cleared - PDFs retained');
@@ -355,7 +354,6 @@ function selectFile(fileId, name) {
     currentContext = '';
     refreshFileList();
     document.getElementById('chatTitle').textContent = `📄 ${name}`;
-    document.getElementById('summarySection').style.display = 'none';
     document.getElementById('emptyPlaceholder').style.display = 'flex';
     document.getElementById('chatContainer').style.display = 'none';
     document.getElementById('chatMessages').innerHTML = `
@@ -364,6 +362,28 @@ function selectFile(fileId, name) {
             <p>Click "Analyze PDF" to start</p>
         </div>
     `;
+}
+
+function renderSummaryInChat(summaryText) {
+    const container = document.getElementById('chatMessages');
+    if (!container || !summaryText) return;
+
+    const existing = document.getElementById('summaryMessage');
+    if (existing) existing.remove();
+
+    const message = document.createElement('div');
+    message.id = 'summaryMessage';
+    message.className = 'message summary';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+    bubble.innerHTML = `
+        <div class="summary-title">Document Summary</div>
+        <div class="summary-content">${marked(summaryText)}</div>
+    `;
+
+    message.appendChild(bubble);
+    container.prepend(message);
 }
 
 function removeFile(fileId) {
@@ -437,11 +457,10 @@ function analyzePDF() {
     .then(data => {
         if (data.success) {
             currentContext = data.summary;
-            document.getElementById('summaryContent').innerHTML = marked(data.summary);
-            document.getElementById('summarySection').style.display = 'block';
             document.getElementById('emptyPlaceholder').style.display = 'none';
             document.getElementById('chatContainer').style.display = 'flex';
             document.getElementById('chatMessages').innerHTML = '';
+            renderSummaryInChat(data.summary);
             document.getElementById('messageInput').disabled = false;
             document.getElementById('sendBtn').disabled = false;
             
@@ -548,12 +567,15 @@ function loadChatHistory() {
         if (data.success && data.history && data.history.length > 0) {
             const container = document.getElementById('chatMessages');
             container.innerHTML = '';
+            renderSummaryInChat(currentContext);
             
             data.history.forEach(msg => {
                 if (msg.role !== 'system') {  // Skip system messages
                     addMessage(msg.role, msg.content);
                 }
             });
+        } else {
+            renderSummaryInChat(currentContext);
         }
     })
     .catch(err => console.error('Failed to load chat history:', err));

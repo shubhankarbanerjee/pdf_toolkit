@@ -1027,6 +1027,16 @@ def get_ai_config():
     
     try:
         config = ai_analyzer.config_manager.get_config()
+
+        # If keys are provided via environment variables, expose provider as enabled
+        # in the UI without returning the secret itself.
+        env_groq = os.environ.get('GROQ_API_KEY', '').strip()
+        if env_groq:
+            config.setdefault('groq', {})
+            config['groq']['enabled'] = True
+            if not config['groq'].get('model'):
+                config['groq']['model'] = 'llama-3.3-70b-versatile'
+
         return jsonify(config)
     except Exception as e:
         return jsonify({'error': str(e)}), 500

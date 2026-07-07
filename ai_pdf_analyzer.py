@@ -375,6 +375,10 @@ class AIPDFAnalyzer:
     
     def _init_providers(self):
         """Initialize AI providers based on configuration."""
+        self._claude_api_key = (self.config.get('claude', {}).get('api_key') or os.environ.get('CLAUDE_API_KEY', '')).strip()
+        self._groq_api_key = (self.config.get('groq', {}).get('api_key') or os.environ.get('GROQ_API_KEY', '')).strip()
+        self._github_api_key = (self.config.get('github', {}).get('api_key') or os.environ.get('GITHUB_MODELS_API_KEY', '')).strip()
+
         self.gemini_initialized = False
         self.openai_initialized = False
         self.claude_initialized = False
@@ -400,15 +404,18 @@ class AIPDFAnalyzer:
             except Exception as e:
                 print(f"[WARNING] OpenAI init failed: {e}")
 
-        if HAS_REQUESTS and self.config['claude']['enabled'] and self.config['claude']['api_key']:
+        claude_enabled = bool(self.config.get('claude', {}).get('enabled')) or bool(self._claude_api_key)
+        if HAS_REQUESTS and claude_enabled and self._claude_api_key:
             self.claude_initialized = True
             print("[OK] Claude configuration loaded")
 
-        if HAS_REQUESTS and self.config['groq']['enabled'] and self.config['groq']['api_key']:
+        groq_enabled = bool(self.config.get('groq', {}).get('enabled')) or bool(self._groq_api_key)
+        if HAS_REQUESTS and groq_enabled and self._groq_api_key:
             self.groq_initialized = True
             print("[OK] Groq configuration loaded")
 
-        if HAS_REQUESTS and self.config['github']['enabled'] and self.config['github']['api_key']:
+        github_enabled = bool(self.config.get('github', {}).get('enabled')) or bool(self._github_api_key)
+        if HAS_REQUESTS and github_enabled and self._github_api_key:
             self.github_initialized = True
             print("[OK] GitHub Models configuration loaded")
         
@@ -835,7 +842,7 @@ Keep the summary concise and well-structured.
             response = requests.post(
                 'https://api.anthropic.com/v1/messages',
                 headers={
-                    'x-api-key': self.config['claude']['api_key'],
+                    'x-api-key': self._claude_api_key,
                     'anthropic-version': '2023-06-01',
                     'content-type': 'application/json',
                 },
@@ -870,7 +877,7 @@ Keep the summary concise and well-structured.
         """Analyze using Groq's OpenAI-compatible API."""
         return self._call_openai_compatible_service(
             provider_name='groq',
-            api_key=self.config['groq']['api_key'],
+            api_key=self._groq_api_key,
             model=self.config['groq']['model'],
             prompt=prompt,
             base_url='https://api.groq.com/openai/v1',
@@ -880,7 +887,7 @@ Keep the summary concise and well-structured.
         """Analyze using GitHub Models with a personal access token."""
         return self._call_openai_compatible_service(
             provider_name='github',
-            api_key=self.config['github']['api_key'],
+            api_key=self._github_api_key,
             model=self.config['github']['model'],
             prompt=prompt,
             base_url=self.config['github'].get('base_url', 'https://models.inference.ai.azure.com'),
@@ -1048,6 +1055,33 @@ Provide a clear, concise answer based on the document. If the answer is not in t
                     'response': response.choices[0].message.content,
                     'provider': provider
                 }
+            elif provider == 'claude' and self.claude_initialized:
+                result = self._analyze_with_claude(prompt, context_text)
+                if result.get('success'):
+                    return {
+                        'success': True,
+                        'response': result.get('summary', ''),
+                        'provider': provider
+                    }
+                return result
+            elif provider == 'groq' and self.groq_initialized:
+                result = self._analyze_with_groq(prompt, context_text)
+                if result.get('success'):
+                    return {
+                        'success': True,
+                        'response': result.get('summary', ''),
+                        'provider': provider
+                    }
+                return result
+            elif provider == 'github' and self.github_initialized:
+                result = self._analyze_with_github(prompt, context_text)
+                if result.get('success'):
+                    return {
+                        'success': True,
+                        'response': result.get('summary', ''),
+                        'provider': provider
+                    }
+                return result
             elif provider == 'ollama':
                 # Use the auto-selected model with endpoint fallback
                 if not self.ollama_model:
