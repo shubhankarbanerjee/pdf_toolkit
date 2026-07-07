@@ -4,7 +4,7 @@ AI PDF Analyzer Module
 ======================
 
 Provides AI-powered PDF analysis with multiple LLM providers.
-Supports: OpenAI, Google Gemini, Local Ollama
+Supports: OpenAI, Google Gemini, Claude, Groq, GitHub Models, Local Ollama
 Features: Session management, PDF caching, unlimited file sizes
 """
 
@@ -82,14 +82,19 @@ class AIConfigManager:
     
     def _load_config(self) -> Dict[str, Any]:
         """Load AI configuration from file."""
+        defaults = self._default_config()
         if self.config_path.exists():
             try:
                 with open(self.config_path, 'r') as f:
-                    return json.load(f)
+                    loaded = json.load(f)
+                for provider, provider_defaults in defaults.items():
+                    if isinstance(loaded.get(provider), dict):
+                        provider_defaults.update(loaded[provider])
+                return defaults
             except Exception as e:
                 print(f"[WARNING] Could not load AI config: {e}")
         
-        return self._default_config()
+        return defaults
     
     @staticmethod
     def _default_config() -> Dict[str, Any]:
@@ -104,6 +109,22 @@ class AIConfigManager:
                 'api_key': '',
                 'enabled': False,
                 'model': 'gemini-pro'
+            },
+            'claude': {
+                'api_key': '',
+                'enabled': False,
+                'model': 'claude-3-5-sonnet-latest'
+            },
+            'groq': {
+                'api_key': '',
+                'enabled': False,
+                'model': 'llama-3.3-70b-versatile'
+            },
+            'github': {
+                'api_key': '',
+                'enabled': False,
+                'model': 'gpt-4o-mini',
+                'base_url': 'https://models.inference.ai.azure.com'
             },
             'ollama': {
                 'host': 'http://localhost:11434',
@@ -356,6 +377,9 @@ class AIPDFAnalyzer:
         """Initialize AI providers based on configuration."""
         self.gemini_initialized = False
         self.openai_initialized = False
+        self.claude_initialized = False
+        self.groq_initialized = False
+        self.github_initialized = False
         self.ollama_available = False
         
         # Initialize Gemini
@@ -375,6 +399,18 @@ class AIPDFAnalyzer:
                 print("[OK] OpenAI initialized")
             except Exception as e:
                 print(f"[WARNING] OpenAI init failed: {e}")
+
+        if HAS_REQUESTS and self.config['claude']['enabled'] and self.config['claude']['api_key']:
+            self.claude_initialized = True
+            print("[OK] Claude configuration loaded")
+
+        if HAS_REQUESTS and self.config['groq']['enabled'] and self.config['groq']['api_key']:
+            self.groq_initialized = True
+            print("[OK] Groq configuration loaded")
+
+        if HAS_REQUESTS and self.config['github']['enabled'] and self.config['github']['api_key']:
+            self.github_initialized = True
+            print("[OK] GitHub Models configuration loaded")
         
         # Check Ollama
         self.ollama_available = False
@@ -557,6 +593,12 @@ class AIPDFAnalyzer:
             providers.append('gemini')
         if self.openai_initialized:
             providers.append('openai')
+        if self.claude_initialized:
+            providers.append('claude')
+        if self.groq_initialized:
+            providers.append('groq')
+        if self.github_initialized:
+            providers.append('github')
         if self.ollama_available:
             providers.append('ollama')
         
@@ -628,7 +670,7 @@ class AIPDFAnalyzer:
         
         Args:
             pdf_path: Path to PDF file
-            provider: AI provider to use (gemini, openai, or ollama)
+            provider: AI provider to use (gemini, openai, claude, groq, github, or ollama)
         
         Returns:
             Analysis result with summary
@@ -673,6 +715,12 @@ Keep the summary concise and well-structured.
                 return self._analyze_with_gemini(prompt, text)
             elif provider == 'openai' and self.openai_initialized:
                 return self._analyze_with_openai(prompt, text)
+            elif provider == 'claude' and self.claude_initialized:
+                return self._analyze_with_claude(prompt, text)
+            elif provider == 'groq' and self.groq_initialized:
+                return self._analyze_with_groq(prompt, text)
+            elif provider == 'github' and self.github_initialized:
+                return self._analyze_with_github(prompt, text)
             elif provider == 'ollama' and self.ollama_available:
                 return self._analyze_with_ollama(prompt, text)
             else:
@@ -728,6 +776,115 @@ Keep the summary concise and well-structured.
                 'success': False,
                 'error': f'OpenAI analysis failed: {str(e)}'
             }
+
+    def _call_openai_compatible_service(
+        self,
+        provider_name: str,
+        api_key: str,
+        model: str,
+        prompt: str,
+        base_url: str,
+        system_prompt: str = "You are a document analysis expert.",
+        max_tokens: int = 1500,
+        extra_headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Call an OpenAI-compatible chat completions endpoint."""
+        try:
+            url = f"{base_url.rstrip('/')}/chat/completions"
+            headers = {
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json',
+            }
+            if extra_headers:
+                headers.update(extra_headers)
+
+            response = requests.post(
+                url,
+                headers=headers,
+                json={
+                    'model': model,
+                    'messages': [
+                        {'role': 'system', 'content': system_prompt},
+                        {'role': 'user', 'content': prompt},
+                    ],
+                    'temperature': 0.7,
+                    'max_tokens': max_tokens,
+                },
+                timeout=120,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            summary = payload.get('choices', [{}])[0].get('message', {}).get('content', '')
+            if not summary:
+                raise ValueError(f'{provider_name} returned an empty response')
+            return {
+                'success': True,
+                'provider': provider_name,
+                'summary': summary,
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'{provider_name.title()} analysis failed: {str(e)}'
+            }
+
+    def _analyze_with_claude(self, prompt: str, context: str) -> Dict[str, Any]:
+        """Analyze using Claude via the Anthropic Messages API."""
+        try:
+            response = requests.post(
+                'https://api.anthropic.com/v1/messages',
+                headers={
+                    'x-api-key': self.config['claude']['api_key'],
+                    'anthropic-version': '2023-06-01',
+                    'content-type': 'application/json',
+                },
+                json={
+                    'model': self.config['claude']['model'],
+                    'max_tokens': 1500,
+                    'temperature': 0.7,
+                    'system': 'You are a document analysis expert.',
+                    'messages': [{'role': 'user', 'content': prompt}],
+                },
+                timeout=120,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            parts = payload.get('content', [])
+            summary = ''.join(part.get('text', '') for part in parts if isinstance(part, dict))
+            if not summary:
+                raise ValueError('Claude returned an empty response')
+            return {
+                'success': True,
+                'provider': 'claude',
+                'summary': summary,
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Claude analysis failed: {str(e)}'
+            }
+
+    def _analyze_with_groq(self, prompt: str, context: str) -> Dict[str, Any]:
+        """Analyze using Groq's OpenAI-compatible API."""
+        return self._call_openai_compatible_service(
+            provider_name='groq',
+            api_key=self.config['groq']['api_key'],
+            model=self.config['groq']['model'],
+            prompt=prompt,
+            base_url='https://api.groq.com/openai/v1',
+        )
+
+    def _analyze_with_github(self, prompt: str, context: str) -> Dict[str, Any]:
+        """Analyze using GitHub Models with a personal access token."""
+        return self._call_openai_compatible_service(
+            provider_name='github',
+            api_key=self.config['github']['api_key'],
+            model=self.config['github']['model'],
+            prompt=prompt,
+            base_url=self.config['github'].get('base_url', 'https://models.inference.ai.azure.com'),
+        )
     
     def _analyze_with_ollama(self, prompt: str, context: str) -> Dict[str, Any]:
         """Analyze using local Ollama or Msty (OpenAI-compatible mode)."""

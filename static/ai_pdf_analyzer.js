@@ -558,6 +558,19 @@ function openSettings() {
             document.getElementById('openaiModel').value = data.openai.model || 'gpt-4-turbo';
             document.getElementById('openaiEnabled').checked = data.openai.enabled || false;
 
+            document.getElementById('claudeKey').value = data.claude?.api_key || '';
+            document.getElementById('claudeModel').value = data.claude?.model || 'claude-3-5-sonnet-latest';
+            document.getElementById('claudeEnabled').checked = data.claude?.enabled || false;
+
+            document.getElementById('groqKey').value = data.groq?.api_key || '';
+            document.getElementById('groqModel').value = data.groq?.model || 'llama-3.3-70b-versatile';
+            document.getElementById('groqEnabled').checked = data.groq?.enabled || false;
+
+            document.getElementById('githubKey').value = data.github?.api_key || '';
+            document.getElementById('githubModel').value = data.github?.model || 'gpt-4o-mini';
+            document.getElementById('githubBaseUrl').value = data.github?.base_url || 'https://models.inference.ai.azure.com';
+            document.getElementById('githubEnabled').checked = data.github?.enabled || false;
+
             document.getElementById('ollamaHost').value = data.ollama.host || 'http://localhost:11434';
             // Store the user preference but don't set it yet - we'll load models first
             window.userSelectedModel = data.ollama.model || '';
@@ -632,12 +645,29 @@ function saveSettings() {
     const config = {
         gemini: {
             api_key: document.getElementById('geminiKey').value,
-            enabled: document.getElementById('geminiEnabled').checked
+            enabled: document.getElementById('geminiEnabled').checked,
+            model: 'gemini-pro'
         },
         openai: {
             api_key: document.getElementById('openaiKey').value,
             model: document.getElementById('openaiModel').value,
             enabled: document.getElementById('openaiEnabled').checked
+        },
+        claude: {
+            api_key: document.getElementById('claudeKey').value,
+            model: document.getElementById('claudeModel').value,
+            enabled: document.getElementById('claudeEnabled').checked
+        },
+        groq: {
+            api_key: document.getElementById('groqKey').value,
+            model: document.getElementById('groqModel').value,
+            enabled: document.getElementById('groqEnabled').checked
+        },
+        github: {
+            api_key: document.getElementById('githubKey').value,
+            model: document.getElementById('githubModel').value,
+            base_url: document.getElementById('githubBaseUrl').value,
+            enabled: document.getElementById('githubEnabled').checked
         },
         ollama: {
             host: document.getElementById('ollamaHost').value,
