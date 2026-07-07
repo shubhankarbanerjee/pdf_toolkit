@@ -8,12 +8,80 @@ let currentFileId = null;
 let sessionId = null;
 let currentContext = '';
 
+const PROVIDER_RADIO_MAP = {
+    gemini: 'gemini',
+    openai: 'openai',
+    claude: 'claude',
+    groq: 'groq',
+    github: 'github',
+    ollama: 'ollama',
+};
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Initializing AI PDF Analyzer...');
     checkDatabaseHealth();
+    refreshProviderRadioAvailability();
     setTimeout(initializeSession, 500);
+    window.addEventListener('resize', setupCompactSettingsMode);
 });
+
+function setupCompactSettingsMode() {
+    const isCompact = window.matchMedia('(max-width: 600px)').matches;
+    const sections = document.querySelectorAll('.modal-section.provider-section');
+    sections.forEach((section, index) => {
+        const title = section.querySelector('.section-title');
+        if (!title) return;
+
+        if (!title.dataset.compactBound) {
+            title.addEventListener('click', () => {
+                if (!window.matchMedia('(max-width: 600px)').matches) return;
+                section.classList.toggle('compact-collapsed');
+            });
+            title.dataset.compactBound = '1';
+        }
+
+        if (isCompact) {
+            const shouldExpand = index === 0;
+            section.classList.toggle('compact-collapsed', !shouldExpand);
+        } else {
+            section.classList.remove('compact-collapsed');
+        }
+    });
+}
+
+function refreshProviderRadioAvailability() {
+    fetch('/get_ai_config')
+        .then(r => r.json())
+        .then(config => {
+            const providerStates = {
+                gemini: Boolean(config?.gemini?.enabled),
+                openai: Boolean(config?.openai?.enabled),
+                claude: Boolean(config?.claude?.enabled),
+                groq: Boolean(config?.groq?.enabled),
+                github: Boolean(config?.github?.enabled),
+                ollama: Boolean(config?.ollama?.enabled),
+            };
+
+            let selectedIsEnabled = false;
+            let firstEnabled = null;
+
+            Object.entries(PROVIDER_RADIO_MAP).forEach(([provider, radioValue]) => {
+                const radio = document.querySelector(`input[name="provider"][value="${radioValue}"]`);
+                if (!radio) return;
+                const enabled = providerStates[provider];
+                radio.disabled = !enabled;
+                radio.closest('label')?.style.setProperty('opacity', enabled ? '1' : '0.45');
+                if (enabled && !firstEnabled) firstEnabled = radio;
+                if (enabled && radio.checked) selectedIsEnabled = true;
+            });
+
+            if (!selectedIsEnabled && firstEnabled) {
+                firstEnabled.checked = true;
+            }
+        })
+        .catch(err => console.warn('Failed to refresh provider availability:', err));
+}
 
 // Check database health on startup
 function checkDatabaseHealth() {
@@ -577,6 +645,7 @@ function openSettings() {
             document.getElementById('ollamaEnabled').checked = data.ollama.enabled || false;
 
             document.getElementById('settingsModal').classList.add('active');
+            setupCompactSettingsMode();
             
             // Load available models
             loadAvailableModels();
@@ -685,6 +754,7 @@ function saveSettings() {
     .then(data => {
         if (data.success) {
             showStatus('success', 'Settings saved successfully');
+            refreshProviderRadioAvailability();
             closeSettings();
         } else {
             showStatus('error', data.error || 'Failed to save settings');
