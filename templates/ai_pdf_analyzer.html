@@ -190,7 +190,7 @@
             display: flex;
             flex-direction: column;
             background: white;
-            overflow: hidden;
+            overflow: auto;
             min-width: 0;
         }
 
@@ -227,7 +227,7 @@
         .chat-messages {
             flex: 1;
             overflow-y: auto;
-            overflow-x: hidden;
+            overflow-x: auto;
             padding: 20px;
             display: flex;
             flex-direction: column;
@@ -313,6 +313,62 @@
             font-size: 13px;
             line-height: 1.6;
             color: #333;
+        }
+
+        /* Code block styling for AI responses */
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+            line-height: 1.5;
+            position: relative;
+            margin: 8px 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .code-block-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #2d2d2d;
+            padding: 8px 12px;
+            border-radius: 4px 4px 0 0;
+            margin-bottom: 8px;
+            font-size: 11px;
+            color: #888;
+        }
+
+        .code-block-header .lang {
+            font-weight: 600;
+            color: #a8d4ff;
+        }
+
+        .copy-btn {
+            background: #333;
+            border: 1px solid #555;
+            color: #d4d4d4;
+            padding: 4px 12px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.2s;
+        }
+
+        .copy-btn:hover {
+            background: #444;
+            border-color: #666;
+            color: #fff;
+        }
+
+        .copy-btn.copied {
+            background: #2d5a3d;
+            border-color: #4a8d5e;
+            color: #7ee8a0;
         }
 
         .chat-input-area {

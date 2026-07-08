@@ -525,14 +525,6 @@
                         </select>
                     </div>
                     <div class="option-group">
-                        <label for="ocr-lang">Language</label>
-                        <select id="ocr-lang">
-                            <option value="eng+hin">English + Hindi</option>
-                            <option value="eng">English Only</option>
-                            <option value="hin">Hindi Only</option>
-                        </select>
-                    </div>
-                    <div class="option-group">
                         <label for="ocr-workers">Parallel Workers</label>
                         <select id="ocr-workers">
                             <option value="1">1 (Sequential)</option>
@@ -582,14 +574,6 @@
                             <option value="72">72 DPI (Smallest size)</option>
                             <option value="100" selected>100 DPI (Small size)</option>
                             <option value="150">150 DPI (Balanced)</option>
-                        </select>
-                    </div>
-                    <div class="option-group">
-                        <label for="compress-lang">OCR Language</label>
-                        <select id="compress-lang">
-                            <option value="eng+hin">English + Hindi</option>
-                            <option value="eng">English Only</option>
-                            <option value="hin">Hindi Only</option>
                         </select>
                     </div>
                 </div>
@@ -669,7 +653,7 @@
 
             <!-- Passport Photos on A4 -->
             <div class="tool-card" id="photos-tool">
-                <h3>📷 Passport Photos on A4</h3>
+                <h3>📷 Passport Photos 1st row PDF</h3>
                 <p class="description">Turn one image into a high-quality passport-photo sheet with 5 or 6 copies on the first row.</p>
 
                 <div class="file-input-wrapper">
@@ -924,13 +908,11 @@
             }
             
             const dpi = document.getElementById('ocr-dpi').value;
-            const lang = document.getElementById('ocr-lang').value;
             const workers = document.getElementById('ocr-workers').value;
             
             const formData = new FormData();
             formData.append('file', file);
             formData.append('dpi', dpi);
-            formData.append('lang', lang);
             formData.append('workers', workers);
             
             callAPI('/api/ocr', formData, 'ocr');
@@ -961,12 +943,10 @@
             }
             
             const dpi = document.getElementById('compress-dpi').value;
-            const lang = document.getElementById('compress-lang').value;
             
             const formData = new FormData();
             formData.append('file', file);
             formData.append('dpi', dpi);
-            formData.append('lang', lang);
             
             callAPI('/api/compress', formData, 'compress');
         }

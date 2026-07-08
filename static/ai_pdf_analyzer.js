@@ -552,11 +552,85 @@ function addMessage(role, text) {
     
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
-    bubble.textContent = text;
+    
+    // Format AI responses with codeblocks for multi-line formatted text
+    if (role === 'ai') {
+        // Check if text contains multiple lines of formatted output or code
+        const lines = text.split('\n').filter(l => l.trim());
+        
+        // If response has multiple lines and looks like formatted data/code
+        if (lines.length > 2) {
+            // Check if it might be code or structured data
+            const hasStructure = /[{}[\]():,]|^\s*[#*-]|^```/.test(text);
+            const isMultilineFormatted = lines.some(l => l.match(/^\s+\S/)); // indented lines
+            
+            if (hasStructure || isMultilineFormatted) {
+                // Create a container with copy button
+                bubble.innerHTML = '';
+                
+                // Add code block header with language detection and copy button
+                const header = document.createElement('div');
+                header.className = 'code-block-header';
+                
+                // Detect language type
+                let langType = 'text';
+                if (/^```/.test(text)) langType = 'markdown';
+                else if (/[{}]|function|class|const|let|var|if|for|while/.test(text)) langType = 'code';
+                else if (/^\s*-|\*|#|#{1,6}\s/.test(text)) langType = 'list';
+                
+                header.innerHTML = `<span class="lang">${langType.toUpperCase()}</span>`;
+                
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'copy-btn';
+                copyBtn.textContent = '📋 Copy';
+                copyBtn.onclick = function(e) {
+                    e.preventDefault();
+                    copyCodeBlock(this, text);
+                };
+                
+                header.appendChild(copyBtn);
+                bubble.appendChild(header);
+                
+                // Add code block with formatted text
+                const codeBlock = document.createElement('pre');
+                codeBlock.className = 'code-block';
+                codeBlock.textContent = text;
+                bubble.appendChild(codeBlock);
+            } else {
+                // Regular multi-line text
+                bubble.textContent = text;
+            }
+        } else {
+            // Single line or short response
+            bubble.textContent = text;
+        }
+    } else {
+        // User messages are always plain text
+        bubble.textContent = text;
+    }
     
     message.appendChild(bubble);
     container.appendChild(message);
     container.scrollTop = container.scrollHeight;
+}
+
+function copyCodeBlock(button, text) {
+    navigator.clipboard.writeText(text).then(() => {
+        const originalText = button.textContent;
+        button.textContent = '✓ Copied!';
+        button.classList.add('copied');
+        
+        setTimeout(() => {
+            button.textContent = originalText;
+            button.classList.remove('copied');
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+        button.textContent = '✗ Failed';
+        setTimeout(() => {
+            button.textContent = '📋 Copy';
+        }, 1500);
+    });
 }
 
 function loadChatHistory() {
