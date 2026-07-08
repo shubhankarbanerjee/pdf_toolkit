@@ -1,16 +1,33 @@
 {
   "gemini": {
     "api_key": "",
-    "enabled": false
+    "enabled": false,
+    "model": "gemini-pro"
   },
   "openai": {
     "api_key": "",
     "model": "gpt-4-turbo",
     "enabled": false
   },
+  "claude": {
+    "api_key": "",
+    "model": "claude-3-5-sonnet-latest",
+    "enabled": false
+  },
+  "groq": {
+    "api_key": "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",
+    "model": "llama-3.3-70b-versatile",
+    "enabled": true
+  },
+  "github": {
+    "api_key": "",
+    "model": "gpt-4o-mini",
+    "base_url": "https://models.inference.ai.azure.com",
+    "enabled": false
+  },
   "ollama": {
     "host": "http://192.168.1.15:11964",
     "model": "",
-    "enabled": true
+    "enabled": false
   }
 }

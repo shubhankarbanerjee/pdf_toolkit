@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF Toolkit - All-in-One PDF Processor</title>
+    <title>ISHEEV PDF Toolkit - All-in-One PDF Processor</title>
     <style>
         * {
             margin: 0;
@@ -376,7 +376,7 @@
 </head>
 <body>
     <header class="header">
-        <h1>📄 PDF Toolkit</h1>
+        <h1>📄 ISHEEV PDF Toolkit</h1>
         <p>All-in-one PDF processor. Works on any device - Android, iPhone, Windows, Mac.</p>
     </header>
 
@@ -465,6 +465,38 @@
                 <div class="result-files" id="split-result"></div>
             </div>
 
+            <!-- Split Odd/Even -->
+            <div class="tool-card" id="oddeven-tool">
+                <h3>📑 Split Odd/Even</h3>
+                <p class="description">Separate odd and even pages for duplex printing.</p>
+                
+                <div class="file-input-wrapper">
+                    <div class="file-input-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        <span>Select PDF</span>
+                    </div>
+                    <input type="file" accept=".pdf" id="oddeven-file" onchange="updateFileName('oddeven-file', 'oddeven-file-name')">
+                </div>
+                <div class="file-name" id="oddeven-file-name"></div>
+                
+                <button class="btn btn-primary" onclick="splitOddEven()" id="oddeven-btn">
+                    <span class="btn-text">Split Odd/Even Pages</span>
+                </button>
+                
+                <div class="progress-container" id="oddeven-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <p class="progress-text">Processing...</p>
+                </div>
+                
+                <div class="status" id="oddeven-status"></div>
+                <div class="result-files" id="oddeven-result"></div>
+            </div>
+
             <!-- OCR PDF -->
             <div class="tool-card" id="ocr-tool">
                 <h3>🔍 OCR PDF</h3>
@@ -524,38 +556,6 @@
                 
                 <div class="status" id="ocr-status"></div>
                 <div class="result-files" id="ocr-result"></div>
-            </div>
-
-            <!-- Split Odd/Even -->
-            <div class="tool-card" id="oddeven-tool">
-                <h3>📑 Split Odd/Even</h3>
-                <p class="description">Separate odd and even pages for duplex printing.</p>
-                
-                <div class="file-input-wrapper">
-                    <div class="file-input-label">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                            <polyline points="14 2 14 8 20 8"/>
-                        </svg>
-                        <span>Select PDF</span>
-                    </div>
-                    <input type="file" accept=".pdf" id="oddeven-file" onchange="updateFileName('oddeven-file', 'oddeven-file-name')">
-                </div>
-                <div class="file-name" id="oddeven-file-name"></div>
-                
-                <button class="btn btn-primary" onclick="splitOddEven()" id="oddeven-btn">
-                    <span class="btn-text">Split Odd/Even Pages</span>
-                </button>
-                
-                <div class="progress-container" id="oddeven-progress">
-                    <div class="progress-bar">
-                        <div class="progress-fill"></div>
-                    </div>
-                    <p class="progress-text">Processing...</p>
-                </div>
-                
-                <div class="status" id="oddeven-status"></div>
-                <div class="result-files" id="oddeven-result"></div>
             </div>
 
             <!-- Compress PDF -->

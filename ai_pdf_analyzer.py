@@ -187,13 +187,19 @@ class PDFTextExtractor:
         # If extraction yielded very little text (scanned PDF), try OCR
         if len(text.strip()) < 200 and use_ocr:
             print(f"[INFO] PDF appears to be scanned (extracted {len(text)} chars), attempting OCR...")
-            text = PDFTextExtractor._extract_text_ocr(pdf_path, max_pages)
+            ocr_text = PDFTextExtractor._extract_text_ocr(pdf_path, max_pages)
+            # If OCR succeeds, use it; otherwise keep the original minimal text
+            if ocr_text:
+                text = ocr_text
+            else:
+                print(f"[WARNING] OCR failed, proceeding with {len(text)} characters of direct extraction")
         
-        # Cache the text
+        # Cache the text (even if it's minimal)
         if db_manager and file_id and text:
             page_count = PDFTextExtractor._get_page_count(pdf_path)
             db_manager.cache_pdf_text(file_id, text, page_count)
         
+        # Return text even if minimal - better to analyze something than fail completely
         return text
     
     @staticmethod
@@ -718,6 +724,8 @@ Keep the summary concise and well-structured.
 """
         
         try:
+            print(f"[DEBUG] analyze_pdf: provider={provider}, initialized_flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}, ollama={self.ollama_available}")
+            
             if provider == 'gemini' and self.gemini_initialized:
                 return self._analyze_with_gemini(prompt, text)
             elif provider == 'openai' and self.openai_initialized:
@@ -731,6 +739,7 @@ Keep the summary concise and well-structured.
             elif provider == 'ollama' and self.ollama_available:
                 return self._analyze_with_ollama(prompt, text)
             else:
+                print(f"[ERROR] Provider {provider} not available or not initialized. Flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}, ollama={self.ollama_available}")
                 return {
                     'success': False,
                     'error': f'Provider {provider} not available'
@@ -1006,6 +1015,9 @@ Keep the summary concise and well-structured.
         Returns:
             Chat response
         """
+        print(f"[DEBUG] chat_with_context called with provider: {provider}")
+        print(f"[DEBUG] groq_initialized: {self.groq_initialized}, provider == 'groq': {provider == 'groq'}")
+        
         if provider is None:
             available = self.get_available_providers()
             if not available:
@@ -1032,6 +1044,8 @@ Provide a clear, concise answer based on the document. If the answer is not in t
 """
         
         try:
+            print(f"[DEBUG] chat_with_context: About to check provider conditions. Provider={provider}, initialized_flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}")
+            
             if provider == 'gemini' and self.gemini_initialized:
                 model = genai.GenerativeModel(self.config['gemini']['model'])
                 response = model.generate_content(prompt)
@@ -1065,6 +1079,7 @@ Provide a clear, concise answer based on the document. If the answer is not in t
                     }
                 return result
             elif provider == 'groq' and self.groq_initialized:
+                print(f"[DEBUG] chat_with_context: Calling _analyze_with_groq")
                 result = self._analyze_with_groq(prompt, context_text)
                 if result.get('success'):
                     return {
@@ -1171,6 +1186,7 @@ Provide a clear, concise answer based on the document. If the answer is not in t
                         'error': f'Ollama analysis failed: {error_msg}'
                     }
             else:
+                print(f"[ERROR] chat_with_context: Provider {provider} not available or not initialized. Flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}, ollama={self.ollama_available}")
                 return {
                     'success': False,
                     'error': f'Provider {provider} not available'
