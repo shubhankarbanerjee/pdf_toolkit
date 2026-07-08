@@ -522,6 +522,28 @@
             flex-wrap: wrap;
             margin-top: 1rem;
         }
+
+        /* Selected-file badge shown inside each tool card */
+        .selected-file-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            color: #1d4ed8;
+            padding: 0.45rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            margin-bottom: 0.75rem;
+            word-break: break-all;
+        }
+
+        .selected-file-badge.no-file {
+            background: #f9fafb;
+            border-color: #e5e7eb;
+            color: #9ca3af;
+        }
     </style>
 </head>
 <body>
@@ -544,61 +566,75 @@
                 </div>
                 <input type="file" accept=".pdf" id="global-pdf-file" onchange="handleGlobalPdfSelection()">
             </div>
-            <div id="global-pdf-name" style="margin-top: 1rem; display: none;">No PDF selected</div>
-            <div class="pdf-selector-controls">
-                <button class="btn btn-secondary" id="view-pdf-btn" onclick="viewPDFInIframe()" disabled style="display: none;">👁️ View PDF</button>
-                <button class="btn btn-secondary" id="ocr-download-btn" onclick="downloadOCRAsText()" disabled style="display: none;">📝 OCR & Download Text</button>
-                <button class="btn btn-secondary" id="metadata-btn" onclick="toggleMetadataSection()" disabled style="display: none;">ℹ️ View Metadata</button>
-            </div>
-        </div>
-
-        <!-- PDF Preview Section -->
-        <div class="pdf-preview-section" id="pdf-preview-section">
-            <div class="pdf-preview-header">
-                <h3>👀 PDF Preview</h3>
-                <button class="btn btn-secondary" onclick="closePDFPreview()" style="padding: 0.4rem 0.8rem; font-size: 0.875rem;">✕ Close</button>
-            </div>
-            <iframe id="pdf-preview-iframe" class="pdf-preview-iframe" title="PDF Preview"></iframe>
-            <div class="pdf-preview-message" id="pdf-preview-message">Loading PDF preview...</div>
-        </div>
-
-        <!-- Metadata Editor Section -->
-        <div class="tool-card" id="metadata-tool" style="display: none; margin-bottom: 2rem;">
-            <h3>ℹ️ PDF Metadata & Headers</h3>
-            <div id="metadata-content" class="metadata-section">
-                <div id="metadata-loading" style="text-align: center; color: var(--text-light);">Loading metadata...</div>
-            </div>
+            <div id="global-pdf-name" style="margin-top:0.75rem; display:none; font-weight:600; color:var(--primary);"></div>
+            <p style="font-size:0.875rem; color:var(--text-light); margin-top:0.5rem;">This file is shared by all tools below — except Passport Photos and AI PDF Analyzer.</p>
         </div>
 
         <div class="tool-grid">
+
+            <!-- View PDF -->
+            <div class="tool-card" id="viewpdf-tool">
+                <h3>👁️ View PDF</h3>
+                <p class="description">Preview the selected PDF directly in your browser without downloading.</p>
+                <div class="selected-file-badge no-file" id="viewpdf-file-badge">📄 No PDF selected above</div>
+                <button class="btn btn-primary" onclick="viewPDFInIframe()" id="viewpdf-btn" disabled>
+                    <span class="btn-text">View PDF</span>
+                </button>
+                <div id="pdf-preview-container" style="display:none; margin-top:1rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                        <span style="font-size:0.875rem; font-weight:600; color:var(--text-light);">PDF Preview</span>
+                        <button onclick="closePDFPreview()" style="background:#f1f5f9; border:1px solid var(--border); border-radius:4px; padding:2px 10px; cursor:pointer;">✕ Close</button>
+                    </div>
+                    <iframe id="pdf-preview-iframe" style="width:100%; height:520px; border:1px solid var(--border); border-radius:8px;" title="PDF Preview"></iframe>
+                </div>
+            </div>
+
+            <!-- PDF Metadata -->
+            <div class="tool-card" id="metadata-tool">
+                <h3>ℹ️ PDF Metadata</h3>
+                <p class="description">View and edit PDF header info: title, author, subject, creator. Download the updated PDF.</p>
+                <div class="selected-file-badge no-file" id="metadata-file-badge">📄 No PDF selected above</div>
+                <button class="btn btn-primary" onclick="loadMetadata()" id="metadata-btn" disabled>
+                    <span class="btn-text">Load Metadata</span>
+                </button>
+                <div id="metadata-content" style="margin-top:1rem; display:none;"></div>
+                <div class="status" id="metadata-status"></div>
+            </div>
+
+            <!-- OCR → Text Download -->
+            <div class="tool-card" id="ocrtext-tool">
+                <h3>📝 OCR → Download Text</h3>
+                <p class="description">Extract all text using PdfPlumber (handles tables) with OCR fallback. Download as .txt file.</p>
+                <div class="selected-file-badge no-file" id="ocrtext-file-badge">📄 No PDF selected above</div>
+                <button class="btn btn-primary" onclick="downloadOCRAsText()" id="ocrtext-btn" disabled>
+                    <span class="btn-text">Extract &amp; Download Text</span>
+                </button>
+                <div class="progress-container" id="ocrtext-progress">
+                    <div class="progress-bar"><div class="progress-fill"></div></div>
+                    <p class="progress-text">Extracting text...</p>
+                </div>
+                <div class="status" id="ocrtext-status"></div>
+            </div>
+
             <!-- Merge PDFs -->
             <div class="tool-card" id="merge-tool">
                 <h3>🔗 Merge PDFs</h3>
                 <p class="description">Combine two PDF files into one document.</p>
-                
-                <div class="file-input-wrapper">
-                    <div class="file-input-label">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                            <polyline points="14 2 14 8 20 8"/>
-                        </svg>
-                        <span>Select First PDF</span>
-                    </div>
-                    <input type="file" accept=".pdf" id="merge-file1" onchange="updateFileName('merge-file1', 'merge-file1-name')">
-                </div>
-                <div class="file-name" id="merge-file1-name"></div>
-                
+
+                <div class="selected-file-badge no-file" id="merge-file-badge">📄 First PDF: No file selected above</div>
+
                 <div class="file-input-wrapper" style="margin-top: 0.75rem;">
                     <div class="file-input-label">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                             <polyline points="14 2 14 8 20 8"/>
                         </svg>
-                        <span>Select Second PDF</span>
+                        <span>Select Second PDF to Merge</span>
                     </div>
                     <input type="file" accept=".pdf" id="merge-file2" onchange="updateFileName('merge-file2', 'merge-file2-name')">
                 </div>
                 <div class="file-name" id="merge-file2-name"></div>
+                <p style="font-size:0.75rem; color:var(--text-light); margin-top:0.25rem;">This will be merged as the second file.</p>
                 
                 <button class="btn btn-primary" onclick="mergePDFs()" id="merge-btn">
                     <span class="btn-text">Merge PDFs</span>
@@ -619,19 +655,9 @@
             <div class="tool-card" id="split-tool">
                 <h3>✂️ Split PDF</h3>
                 <p class="description">Split large PDF into smaller files by size.</p>
-                
-                <div class="file-input-wrapper">
-                    <div class="file-input-label">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                            <polyline points="14 2 14 8 20 8"/>
-                        </svg>
-                        <span>Select PDF to Split</span>
-                    </div>
-                    <input type="file" accept=".pdf" id="split-file" onchange="updateFileName('split-file', 'split-file-name')">
-                </div>
-                <div class="file-name" id="split-file-name"></div>
-                
+
+                <div class="selected-file-badge no-file" id="split-file-badge">📄 No PDF selected above</div>
+
                 <div class="options">
                     <div class="option-group">
                         <label for="split-size">Max Size per Part (MB)</label>
@@ -658,19 +684,9 @@
             <div class="tool-card" id="oddeven-tool">
                 <h3>📑 Split Odd/Even</h3>
                 <p class="description">Separate odd and even pages for duplex printing.</p>
-                
-                <div class="file-input-wrapper">
-                    <div class="file-input-label">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                            <polyline points="14 2 14 8 20 8"/>
-                        </svg>
-                        <span>Select PDF</span>
-                    </div>
-                    <input type="file" accept=".pdf" id="oddeven-file" onchange="updateFileName('oddeven-file', 'oddeven-file-name')">
-                </div>
-                <div class="file-name" id="oddeven-file-name"></div>
-                
+
+                <div class="selected-file-badge no-file" id="oddeven-file-badge">📄 No PDF selected above</div>
+
                 <button class="btn btn-primary" onclick="splitOddEven()" id="oddeven-btn">
                     <span class="btn-text">Split Odd/Even Pages</span>
                 </button>
@@ -690,19 +706,9 @@
             <div class="tool-card" id="ocr-tool">
                 <h3>🔍 OCR PDF</h3>
                 <p class="description">Make scanned PDFs searchable with OCR text layer.</p>
-                
-                <div class="file-input-wrapper">
-                    <div class="file-input-label">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                            <polyline points="14 2 14 8 20 8"/>
-                        </svg>
-                        <span>Select PDF for OCR</span>
-                    </div>
-                    <input type="file" accept=".pdf" id="ocr-file" onchange="updateFileName('ocr-file', 'ocr-file-name')">
-                </div>
-                <div class="file-name" id="ocr-file-name"></div>
-                
+
+                <div class="selected-file-badge no-file" id="ocr-file-badge">📄 No PDF selected above</div>
+
                 <div class="options">
                     <div class="option-group">
                         <label for="ocr-dpi">OCR Resolution (DPI)</label>
@@ -743,19 +749,9 @@
             <div class="tool-card" id="compress-tool">
                 <h3>🗜️ Compress PDF</h3>
                 <p class="description">Reduce PDF file size with OCR text layer.</p>
-                
-                <div class="file-input-wrapper">
-                    <div class="file-input-label">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                            <polyline points="14 2 14 8 20 8"/>
-                        </svg>
-                        <span>Select PDF to Compress</span>
-                    </div>
-                    <input type="file" accept=".pdf" id="compress-file" onchange="updateFileName('compress-file', 'compress-file-name')">
-                </div>
-                <div class="file-name" id="compress-file-name"></div>
-                
+
+                <div class="selected-file-badge no-file" id="compress-file-badge">📄 No PDF selected above</div>
+
                 <div class="options">
                     <div class="option-group">
                         <label for="compress-dpi">Output Resolution (DPI)</label>
@@ -787,17 +783,7 @@
                 <h3>🖼️ PDF to Images</h3>
                 <p class="description">Convert selected PDF pages to high-quality A4 images.</p>
 
-                <div class="file-input-wrapper">
-                    <div class="file-input-label">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M4 4h16v16H4z"/>
-                            <path d="M8 8h8v8H8z"/>
-                        </svg>
-                        <span>Select PDF</span>
-                    </div>
-                    <input type="file" accept=".pdf" id="pdfimages-file" onchange="onPdfImagesFileChange()">
-                </div>
-                <div class="file-name" id="pdfimages-file-name"></div>
+                <div class="selected-file-badge no-file" id="pdfimages-file-badge">📄 No PDF selected above</div>
 
                 <div class="options">
                     <div class="option-group">
@@ -917,7 +903,8 @@
             </div>
 
             <!-- PDF Diff -->
-            <div class="tool-card" id="diff-tool" style="border: 2px solid #1e3a5f; background: linear-gradient(135deg, rgba(30,58,95,0.05) 0%, rgba(45,106,159,0.05) 100%);">
+            <div class="tool-card" id="diff-tool" style="border: 2px solid #1e3a5f; background: linear-gradient(135deg, rgba(30,58,95,0.05) 0%, rgba(45,106,159,0.05) 100%);">                
+                <div class="selected-file-badge no-file" id="diff-file-badge">📄 First PDF: No file selected above</div>
                 <h3>📄↔📄 PDF Diff</h3>
                 <p class="description">Compare two PDFs side-by-side. Highlights text changes, spelling differences, and image differences. Ignores compression and quality changes.</p>
 
@@ -1054,89 +1041,70 @@
 
         // Merge PDFs
         function mergePDFs() {
-            const file1 = document.getElementById('merge-file1').files[0];
-            const file2 = document.getElementById('merge-file2').files[0];
-            
-            if (!file1 || !file2) {
-                showStatus('merge-status', 'Please select both PDF files', 'error');
+            if (!selectedGlobalFile) {
+                showStatus('merge-status', 'Please select a PDF file in the selector above', 'error');
                 return;
             }
-            
+            const file2 = document.getElementById('merge-file2').files[0];
+            if (!file2) {
+                showStatus('merge-status', 'Please select the second PDF file', 'error');
+                return;
+            }
             const formData = new FormData();
-            formData.append('file1', file1);
+            formData.append('file1', selectedGlobalFile);
             formData.append('file2', file2);
-            
             callAPI('/api/merge', formData, 'merge');
         }
 
         // Split PDF
         function splitPDF() {
-            const file = document.getElementById('split-file').files[0];
-            
-            if (!file) {
-                showStatus('split-status', 'Please select a PDF file', 'error');
+            if (!selectedGlobalFile) {
+                showStatus('split-status', 'Please select a PDF file in the selector above', 'error');
                 return;
             }
-            
             const maxSize = document.getElementById('split-size').value;
-            
             const formData = new FormData();
-            formData.append('file', file);
+            formData.append('file', selectedGlobalFile);
             formData.append('max_size', maxSize);
-            
             callAPI('/api/split', formData, 'split');
         }
 
         // OCR PDF
         function ocrPDF() {
-            const file = document.getElementById('ocr-file').files[0];
-            
-            if (!file) {
-                showStatus('ocr-status', 'Please select a PDF file', 'error');
+            if (!selectedGlobalFile) {
+                showStatus('ocr-status', 'Please select a PDF file in the selector above', 'error');
                 return;
             }
-            
             const dpi = document.getElementById('ocr-dpi').value;
             const workers = document.getElementById('ocr-workers').value;
-            
             const formData = new FormData();
-            formData.append('file', file);
+            formData.append('file', selectedGlobalFile);
             formData.append('dpi', dpi);
             formData.append('workers', workers);
-            
             callAPI('/api/ocr', formData, 'ocr');
         }
 
         // Split Odd/Even
         function splitOddEven() {
-            const file = document.getElementById('oddeven-file').files[0];
-            
-            if (!file) {
-                showStatus('oddeven-status', 'Please select a PDF file', 'error');
+            if (!selectedGlobalFile) {
+                showStatus('oddeven-status', 'Please select a PDF file in the selector above', 'error');
                 return;
             }
-            
             const formData = new FormData();
-            formData.append('file', file);
-            
+            formData.append('file', selectedGlobalFile);
             callAPI('/api/split_odd_even', formData, 'oddeven');
         }
 
         // Compress PDF
         function compressPDF() {
-            const file = document.getElementById('compress-file').files[0];
-            
-            if (!file) {
-                showStatus('compress-status', 'Please select a PDF file', 'error');
+            if (!selectedGlobalFile) {
+                showStatus('compress-status', 'Please select a PDF file in the selector above', 'error');
                 return;
             }
-            
             const dpi = document.getElementById('compress-dpi').value;
-            
             const formData = new FormData();
-            formData.append('file', file);
+            formData.append('file', selectedGlobalFile);
             formData.append('dpi', dpi);
-            
             callAPI('/api/compress', formData, 'compress');
         }
 
@@ -1163,21 +1131,13 @@
         }
 
         function onPdfImagesFileChange() {
-            const file = document.getElementById('pdfimages-file').files[0];
-            const nameDisplay = document.getElementById('pdfimages-file-name');
+            // Called when global PDF is selected — auto-fetch page count
+            const file = selectedGlobalFile;
             const fromField = document.getElementById('pdfimages-from-page');
             const toField = document.getElementById('pdfimages-to-page');
-
-            if (!file) {
-                nameDisplay.textContent = '';
-                return;
-            }
-
-            nameDisplay.textContent = '✓ ' + file.name;
-
+            if (!file) return;
             const formData = new FormData();
             formData.append('file', file);
-
             fetch('/api/pdf_page_count', {
                 method: 'POST',
                 body: formData
@@ -1200,20 +1160,17 @@
         }
 
         function convertPDFToImages() {
-            const file = document.getElementById('pdfimages-file').files[0];
-
-            if (!file) {
-                showStatus('pdfimages-status', 'Please select a PDF file', 'error');
+            if (!selectedGlobalFile) {
+                showStatus('pdfimages-status', 'Please select a PDF file in the selector above', 'error');
                 return;
             }
-
             const fromPage = document.getElementById('pdfimages-from-page').value;
             const toPage = document.getElementById('pdfimages-to-page').value;
             const format = document.getElementById('pdfimages-format').value;
             const dpi = document.getElementById('pdfimages-dpi').value;
 
             const formData = new FormData();
-            formData.append('file', file);
+            formData.append('file', selectedGlobalFile);
             formData.append('from_page', fromPage);
             formData.append('to_page', toPage);
             formData.append('format', format);
@@ -1225,141 +1182,145 @@
         // Global PDF Selection Functions
         let selectedGlobalFile = null;
 
+        // IDs of all tools that use the global file
+        const GLOBAL_TOOL_BADGES = [
+            'viewpdf-file-badge',
+            'metadata-file-badge',
+            'ocrtext-file-badge',
+            'merge-file-badge',
+            'split-file-badge',
+            'oddeven-file-badge',
+            'ocr-file-badge',
+            'compress-file-badge',
+            'pdfimages-file-badge',
+            'diff-file-badge'
+        ];
+
+        // IDs of buttons to enable/disable based on global file
+        const GLOBAL_TOOL_BTNS = [
+            'viewpdf-btn', 'metadata-btn', 'ocrtext-btn',
+            'merge-btn', 'split-btn', 'oddeven-btn',
+            'ocr-btn', 'compress-btn', 'pdfimages-btn'
+        ];
+
         function handleGlobalPdfSelection() {
             const input = document.getElementById('global-pdf-file');
             const nameDisplay = document.getElementById('global-pdf-name');
-            const viewBtn = document.getElementById('view-pdf-btn');
-            const ocrBtn = document.getElementById('ocr-download-btn');
-            const metadataBtn = document.getElementById('metadata-btn');
 
             if (input.files.length > 0) {
                 selectedGlobalFile = input.files[0];
-                nameDisplay.textContent = '✓ ' + selectedGlobalFile.name;
+                const fname = selectedGlobalFile.name;
+
+                // Show selected file name in the header
+                nameDisplay.textContent = '✓ ' + fname;
                 nameDisplay.style.display = 'block';
-                viewBtn.style.display = 'inline-block';
-                ocrBtn.style.display = 'inline-block';
-                metadataBtn.style.display = 'inline-block';
-                viewBtn.disabled = false;
-                ocrBtn.disabled = false;
-                metadataBtn.disabled = false;
+
+                // Update all badges
+                GLOBAL_TOOL_BADGES.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    el.classList.remove('no-file');
+                    const isMerge = id === 'merge-file-badge';
+                    const isDiff  = id === 'diff-file-badge';
+                    el.textContent = (isMerge || isDiff ? '📄 First PDF: ' : '📄 ') + fname;
+                });
+
+                // Enable tool buttons
+                GLOBAL_TOOL_BTNS.forEach(id => {
+                    const btn = document.getElementById(id);
+                    if (btn) btn.disabled = false;
+                });
+
+                // Auto-fetch page count for PDF-to-Images
+                onPdfImagesFileChange();
+
             } else {
                 selectedGlobalFile = null;
                 nameDisplay.style.display = 'none';
-                viewBtn.style.display = 'none';
-                ocrBtn.style.display = 'none';
-                metadataBtn.style.display = 'none';
+
+                // Reset badges
+                GLOBAL_TOOL_BADGES.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    el.classList.add('no-file');
+                    const isMerge = id === 'merge-file-badge';
+                    const isDiff  = id === 'diff-file-badge';
+                    el.textContent = (isMerge || isDiff ? '📄 First PDF: No file selected above' : '📄 No PDF selected above');
+                });
+
+                // Disable tool buttons
+                GLOBAL_TOOL_BTNS.forEach(id => {
+                    const btn = document.getElementById(id);
+                    if (btn) btn.disabled = true;
+                });
             }
         }
 
         function viewPDFInIframe() {
-            if (!selectedGlobalFile) {
-                alert('Please select a PDF file first');
-                return;
-            }
-
+            if (!selectedGlobalFile) return;
             const reader = new FileReader();
             reader.onload = function(e) {
+                const container = document.getElementById('pdf-preview-container');
                 const iframe = document.getElementById('pdf-preview-iframe');
-                const preview = document.getElementById('pdf-preview-section');
-                const message = document.getElementById('pdf-preview-message');
-                
-                // Create object URL for PDF
                 const blob = new Blob([e.target.result], { type: 'application/pdf' });
-                const url = URL.createObjectURL(blob);
-                
-                iframe.src = url;
-                iframe.classList.add('active');
-                message.style.display = 'none';
-                preview.classList.add('active');
-                
-                // Scroll to preview
-                preview.scrollIntoView({ behavior: 'smooth' });
+                iframe.src = URL.createObjectURL(blob);
+                container.style.display = 'block';
+                container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             };
             reader.readAsArrayBuffer(selectedGlobalFile);
         }
 
         function closePDFPreview() {
-            const preview = document.getElementById('pdf-preview-section');
+            const container = document.getElementById('pdf-preview-container');
             const iframe = document.getElementById('pdf-preview-iframe');
-            const message = document.getElementById('pdf-preview-message');
-            
             iframe.src = '';
-            iframe.classList.remove('active');
-            message.style.display = 'block';
-            preview.classList.remove('active');
+            container.style.display = 'none';
         }
 
         function toggleMetadataSection() {
-            if (!selectedGlobalFile) {
-                alert('Please select a PDF file first');
-                return;
-            }
-
-            const metadataTool = document.getElementById('metadata-tool');
-            if (metadataTool.style.display === 'none') {
-                metadataTool.style.display = 'block';
-                loadMetadata();
-                metadataTool.scrollIntoView({ behavior: 'smooth' });
-            } else {
-                metadataTool.style.display = 'none';
-            }
+            // kept for backward compatibility; loadMetadata() is called directly from the button
+            loadMetadata();
         }
 
         function loadMetadata() {
             if (!selectedGlobalFile) return;
+            const btn = document.getElementById('metadata-btn');
+            const contentDiv = document.getElementById('metadata-content');
+            contentDiv.innerHTML = '<div style="text-align:center; color:var(--text-light); padding:1rem;">Loading metadata...</div>';
+            contentDiv.style.display = 'block';
+            if (btn) { btn.disabled = true; btn.querySelector('.btn-text').textContent = 'Loading...'; }
 
             const formData = new FormData();
             formData.append('file', selectedGlobalFile);
 
-            const content = document.getElementById('metadata-content');
-            content.innerHTML = '<div style="text-align: center; color: var(--text-light);">Loading metadata...</div>';
-
-            fetch('/api/get_metadata', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
+            fetch('/api/get_metadata', { method: 'POST', body: formData })
+            .then(r => r.json())
             .then(data => {
+                if (btn) { btn.disabled = false; btn.querySelector('.btn-text').textContent = 'Reload Metadata'; }
                 if (data.error) {
-                    content.innerHTML = `<div style="color: var(--error);">${data.error}</div>`;
+                    contentDiv.innerHTML = `<div style="color:var(--error);">${data.error}</div>`;
                     return;
                 }
-
-                // Display metadata fields
-                let html = '<div class="metadata-section">';
-                
-                const fields = {
-                    'Title': 'title',
-                    'Author': 'author',
-                    'Subject': 'subject',
-                    'Creator': 'creator',
-                    'Producer': 'producer',
-                    'Creation Date': 'creation_date',
-                    'Modification Date': 'modification_date'
-                };
-
-                for (let [label, key] of Object.entries(fields)) {
-                    const value = data[key] || '';
-                    html += `
-                        <div class="metadata-field">
-                            <label>${label}</label>
-                            <input type="text" id="meta-${key}" value="${value}" placeholder="Not set">
-                        </div>
-                    `;
+                const editableFields = { 'Title': 'title', 'Author': 'author', 'Subject': 'subject', 'Creator': 'creator', 'Producer': 'producer' };
+                const readonlyFields = { 'Creation Date': 'creation_date', 'Modification Date': 'modification_date', 'Pages': 'pages' };
+                let html = '<div style="border-top:1px solid var(--border); margin-top:0.75rem; padding-top:0.75rem;">';
+                for (let [label, key] of Object.entries(editableFields)) {
+                    const val = data[key] || '';
+                    html += `<div class="metadata-field"><label>${label}</label><input type="text" id="meta-${key}" value="${val.replace(/"/g, '&quot;')}" placeholder="Not set"></div>`;
                 }
-
+                for (let [label, key] of Object.entries(readonlyFields)) {
+                    const val = data[key] || '';
+                    html += `<div class="metadata-field"><label>${label}</label><input type="text" value="${val.replace(/"/g, '&quot;')}" readonly style="background:#f9fafb; color:var(--text-light);"></div>`;
+                }
                 html += '</div>';
-                html += `
-                    <div class="metadata-actions">
-                        <button class="btn btn-primary" onclick="updateMetadata()">💾 Save Changes</button>
-                        <button class="btn btn-secondary" onclick="downloadPDFWithMetadata()">📥 Download PDF</button>
-                    </div>
-                `;
-
-                content.innerHTML = html;
+                html += `<div class="metadata-actions">
+                    <button class="btn btn-primary" onclick="downloadPDFWithMetadata()">📥 Download PDF with Updated Metadata</button>
+                </div>`;
+                contentDiv.innerHTML = html;
             })
-            .catch(error => {
-                content.innerHTML = `<div style="color: var(--error);">Error loading metadata: ${error.message}</div>`;
+            .catch(err => {
+                if (btn) { btn.disabled = false; btn.querySelector('.btn-text').textContent = 'Reload Metadata'; }
+                contentDiv.innerHTML = `<div style="color:var(--error);">Error: ${err.message}</div>`;
             });
         }
 
@@ -1426,32 +1387,25 @@
         }
 
         function downloadOCRAsText() {
-            if (!selectedGlobalFile) {
-                alert('Please select a PDF file first');
-                return;
-            }
+            if (!selectedGlobalFile) return;
+            const btn = document.getElementById('ocrtext-btn');
+            const progress = document.getElementById('ocrtext-progress');
+            const status = document.getElementById('ocrtext-status');
+
+            btn.disabled = true;
+            btn.querySelector('.btn-text').innerHTML = '<span class="spinner"></span> Extracting...';
+            progress.style.display = 'block';
+            status.style.display = 'none';
 
             const formData = new FormData();
             formData.append('file', selectedGlobalFile);
 
-            const statusDiv = document.createElement('div');
-            statusDiv.className = 'status info';
-            statusDiv.textContent = 'Processing OCR and extracting text...';
-            statusDiv.style.display = 'block';
-            document.body.appendChild(statusDiv);
-
-            fetch('/api/ocr_download_text', {
-                method: 'POST',
-                body: formData
-            })
+            fetch('/api/ocr_download_text', { method: 'POST', body: formData })
             .then(response => {
-                if (response.ok) {
-                    return response.blob().then(blob => ({ blob, headers: response.headers }));
-                } else {
-                    throw new Error('Error processing PDF');
-                }
+                if (!response.ok) return response.json().then(d => { throw new Error(d.error || 'Server error'); });
+                return response.blob();
             })
-            .then(({ blob, headers }) => {
+            .then(blob => {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
@@ -1460,12 +1414,23 @@
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
-                statusDiv.remove();
+
+                progress.style.display = 'none';
+                btn.disabled = false;
+                btn.querySelector('.btn-text').textContent = 'Extract & Download Text';
+
+                status.textContent = '✓ Text downloaded successfully!';
+                status.className = 'status success';
+                status.style.display = 'block';
             })
-            .catch(error => {
-                statusDiv.textContent = 'Error: ' + error.message;
-                statusDiv.className = 'status error';
-                setTimeout(() => statusDiv.remove(), 5000);
+            .catch(err => {
+                progress.style.display = 'none';
+                btn.disabled = false;
+                btn.querySelector('.btn-text').textContent = 'Extract & Download Text';
+
+                status.textContent = '✗ ' + err.message;
+                status.className = 'status error';
+                status.style.display = 'block';
             });
         }
     </script>
