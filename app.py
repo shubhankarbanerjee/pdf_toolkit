@@ -49,6 +49,21 @@ except ImportError as e:
     print(f"[WARNING] Database Manager not available: {e}")
     HAS_DB = False
 
+# Import PDF metadata and advanced text extraction
+try:
+    import PyPDF2
+    HAS_PYPDF2 = True
+except ImportError:
+    print(f"[WARNING] PyPDF2 not available for metadata handling")
+    HAS_PYPDF2 = False
+
+try:
+    import pdfplumber
+    HAS_PDFPLUMBER = True
+except ImportError:
+    print(f"[WARNING] pdfplumber not available for advanced text extraction")
+    HAS_PDFPLUMBER = False
+
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -1157,6 +1172,242 @@ def set_ollama_model():
             return jsonify({'success': False, 'error': 'Failed to set model'}), 500
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PDF METADATA AND ADVANCED TEXT EXTRACTION ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/get_metadata', methods=['POST'])
+def get_metadata():
+    """Extract metadata from a PDF file."""
+    if not HAS_PYPDF2:
+        return jsonify({'error': 'PyPDF2 not available'}), 400
+    
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'PDF file is required'}), 400
+        
+        file = request.files['file']
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'File must be a PDF'}), 400
+        
+        # Read PDF metadata
+        pdf_reader = PyPDF2.PdfReader(file.stream)
+        metadata = pdf_reader.metadata
+        
+        result = {
+            'title': metadata.get('/Title', '') if metadata else '',
+            'author': metadata.get('/Author', '') if metadata else '',
+            'subject': metadata.get('/Subject', '') if metadata else '',
+            'creator': metadata.get('/Creator', '') if metadata else '',
+            'producer': metadata.get('/Producer', '') if metadata else '',
+            'creation_date': str(metadata.get('/CreationDate', '')) if metadata else '',
+            'modification_date': str(metadata.get('/ModDate', '')) if metadata else '',
+            'pages': len(pdf_reader.pages) if pdf_reader.pages else 0
+        }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/update_metadata', methods=['POST'])
+def update_metadata():
+    """Update PDF metadata (stores updated metadata for download)."""
+    if not HAS_PYPDF2:
+        return jsonify({'error': 'PyPDF2 not available'}), 400
+    
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'PDF file is required'}), 400
+        
+        file = request.files['file']
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'File must be a PDF'}), 400
+        
+        # Save the file temporarily
+        unique_id = str(uuid.uuid4())
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{unique_id}_{secure_filename(file.filename)}")
+        file.save(file_path)
+        
+        # Read the original PDF
+        with open(file_path, 'rb') as f:
+            pdf_reader = PyPDF2.PdfReader(f)
+            pdf_writer = PyPDF2.PdfWriter()
+            
+            # Copy pages
+            for page in pdf_reader.pages:
+                pdf_writer.add_page(page)
+            
+            # Add metadata
+            pdf_writer.add_metadata({
+                '/Title': request.form.get('title', ''),
+                '/Author': request.form.get('author', ''),
+                '/Subject': request.form.get('subject', ''),
+                '/Creator': request.form.get('creator', ''),
+                '/Producer': request.form.get('producer', ''),
+            })
+            
+            # Save to output
+            output_filename = f"metadata_{unique_id}_{secure_filename(file.filename)}"
+            output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
+            
+            with open(output_path, 'wb') as output_file:
+                pdf_writer.write(output_file)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Metadata updated successfully',
+            'download_url': f'/api/download/{output_filename}'
+        })
+        
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/download_pdf_with_metadata', methods=['POST'])
+def download_pdf_with_metadata():
+    """Download PDF with updated metadata."""
+    if not HAS_PYPDF2:
+        return jsonify({'error': 'PyPDF2 not available'}), 400
+    
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'PDF file is required'}), 400
+        
+        file = request.files['file']
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'File must be a PDF'}), 400
+        
+        # Read the original PDF
+        pdf_reader = PyPDF2.PdfReader(file.stream)
+        pdf_writer = PyPDF2.PdfWriter()
+        
+        # Copy pages
+        for page in pdf_reader.pages:
+            pdf_writer.add_page(page)
+        
+        # Add/update metadata
+        pdf_writer.add_metadata({
+            '/Title': request.form.get('title', ''),
+            '/Author': request.form.get('author', ''),
+            '/Subject': request.form.get('subject', ''),
+            '/Creator': request.form.get('creator', ''),
+            '/Producer': request.form.get('producer', ''),
+        })
+        
+        # Write to bytes
+        output = io.BytesIO()
+        pdf_writer.write(output)
+        output.seek(0)
+        
+        return send_file(
+            output,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name='pdf_with_metadata.pdf'
+        )
+        
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/ocr_download_text', methods=['POST'])
+def ocr_download_text():
+    """Extract text from PDF using OCR and PdfPlumber, return as downloadable text file."""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'PDF file is required'}), 400
+        
+        file = request.files['file']
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'File must be a PDF'}), 400
+        
+        # Save uploaded file temporarily
+        unique_id = str(uuid.uuid4())
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{unique_id}_{secure_filename(file.filename)}")
+        file.save(file_path)
+        
+        extracted_text = []
+        
+        # Try using PdfPlumber first for better table and text extraction
+        if HAS_PDFPLUMBER:
+            try:
+                import pdfplumber
+                with pdfplumber.open(file_path) as pdf:
+                    for page_num, page in enumerate(pdf.pages, 1):
+                        extracted_text.append(f"\n{'='*60}\n")
+                        extracted_text.append(f"PAGE {page_num}\n")
+                        extracted_text.append(f"{'='*60}\n")
+                        
+                        # Extract regular text
+                        text = page.extract_text()
+                        if text:
+                            extracted_text.append(text)
+                        
+                        # Extract tables if present
+                        tables = page.extract_tables()
+                        if tables:
+                            extracted_text.append("\n\n--- TABLES ON THIS PAGE ---\n")
+                            for table_idx, table in enumerate(tables, 1):
+                                extracted_text.append(f"\nTable {table_idx}:\n")
+                                for row in table:
+                                    extracted_text.append(" | ".join(str(cell) if cell else "" for cell in row))
+                                    extracted_text.append("\n")
+            except Exception as e:
+                print(f"[WARNING] PdfPlumber extraction failed: {e}, falling back to OCR")
+        
+        # Fallback to OCR if PdfPlumber didn't work or didn't extract enough
+        if not extracted_text or len(''.join(extracted_text)) < 100:
+            if HAS_AI_ANALYZER:
+                try:
+                    extractor = PDFTextExtractor()
+                    text = extractor.extract_text(file_path)
+                    if text:
+                        extracted_text = [text]
+                except Exception as e:
+                    print(f"[WARNING] OCR extraction failed: {e}")
+        
+        # If still no text, try PyPDF2
+        if not extracted_text or len(''.join(extracted_text)) < 50:
+            if HAS_PYPDF2:
+                try:
+                    with open(file_path, 'rb') as f:
+                        pdf_reader = PyPDF2.PdfReader(f)
+                        for page_num, page in enumerate(pdf_reader.pages, 1):
+                            text = page.extract_text()
+                            if text:
+                                extracted_text.append(f"\n--- PAGE {page_num} ---\n")
+                                extracted_text.append(text)
+                except Exception as e:
+                    print(f"[WARNING] PyPDF2 extraction failed: {e}")
+        
+        # Combine all extracted text
+        final_text = ''.join(extracted_text)
+        
+        if not final_text.strip():
+            return jsonify({'error': 'No text could be extracted from the PDF'}), 400
+        
+        # Return as downloadable text file
+        output = io.BytesIO()
+        output.write(final_text.encode('utf-8'))
+        output.seek(0)
+        
+        return send_file(
+            output,
+            mimetype='text/plain',
+            as_attachment=True,
+            download_name=file.filename.replace('.pdf', '_ocr.txt')
+        )
+        
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/get_db_stats', methods=['GET'])

@@ -372,6 +372,156 @@
             color: var(--error);
             font-weight: bold;
         }
+
+        /* Global PDF Selector Section */
+        .pdf-selector-section {
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.05) 0%, rgba(59, 130, 246, 0.05) 100%);
+            border: 2px dashed var(--primary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .pdf-selector-section h2 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--primary);
+        }
+
+        .pdf-selector-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            justify-content: center;
+            align-items: center;
+            margin-top: 1rem;
+        }
+
+        .pdf-selector-controls > * {
+            flex: 0 1 auto;
+        }
+
+        #global-pdf-name {
+            font-weight: 600;
+            color: var(--text);
+            padding: 0.5rem 1rem;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            min-width: 200px;
+            text-align: left;
+        }
+
+        .btn-secondary {
+            background: var(--secondary);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .btn-secondary:hover {
+            background: #475569;
+        }
+
+        .btn-secondary:disabled {
+            background: #cbd5e1;
+            cursor: not-allowed;
+        }
+
+        /* PDF Preview Section */
+        .pdf-preview-section {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            display: none;
+        }
+
+        .pdf-preview-section.active {
+            display: block;
+        }
+
+        .pdf-preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .pdf-preview-header h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        .pdf-preview-iframe {
+            width: 100%;
+            height: 600px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            display: none;
+        }
+
+        .pdf-preview-iframe.active {
+            display: block;
+        }
+
+        .pdf-preview-message {
+            text-align: center;
+            color: var(--text-light);
+            padding: 2rem;
+        }
+
+        /* Metadata Editor */
+        .metadata-section {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+
+        .metadata-field {
+            margin-bottom: 1rem;
+        }
+
+        .metadata-field label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--text);
+        }
+
+        .metadata-field input,
+        .metadata-field textarea {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 0.875rem;
+        }
+
+        .metadata-field textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .metadata-actions {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+        }
     </style>
 </head>
 <body>
@@ -381,6 +531,45 @@
     </header>
 
     <main class="container">
+        <!-- Global PDF Selector -->
+        <div class="pdf-selector-section">
+            <h2>📁 Select a PDF File</h2>
+            <div class="file-input-wrapper">
+                <div class="file-input-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    <span>Choose PDF File</span>
+                </div>
+                <input type="file" accept=".pdf" id="global-pdf-file" onchange="handleGlobalPdfSelection()">
+            </div>
+            <div id="global-pdf-name" style="margin-top: 1rem; display: none;">No PDF selected</div>
+            <div class="pdf-selector-controls">
+                <button class="btn btn-secondary" id="view-pdf-btn" onclick="viewPDFInIframe()" disabled style="display: none;">👁️ View PDF</button>
+                <button class="btn btn-secondary" id="ocr-download-btn" onclick="downloadOCRAsText()" disabled style="display: none;">📝 OCR & Download Text</button>
+                <button class="btn btn-secondary" id="metadata-btn" onclick="toggleMetadataSection()" disabled style="display: none;">ℹ️ View Metadata</button>
+            </div>
+        </div>
+
+        <!-- PDF Preview Section -->
+        <div class="pdf-preview-section" id="pdf-preview-section">
+            <div class="pdf-preview-header">
+                <h3>👀 PDF Preview</h3>
+                <button class="btn btn-secondary" onclick="closePDFPreview()" style="padding: 0.4rem 0.8rem; font-size: 0.875rem;">✕ Close</button>
+            </div>
+            <iframe id="pdf-preview-iframe" class="pdf-preview-iframe" title="PDF Preview"></iframe>
+            <div class="pdf-preview-message" id="pdf-preview-message">Loading PDF preview...</div>
+        </div>
+
+        <!-- Metadata Editor Section -->
+        <div class="tool-card" id="metadata-tool" style="display: none; margin-bottom: 2rem;">
+            <h3>ℹ️ PDF Metadata & Headers</h3>
+            <div id="metadata-content" class="metadata-section">
+                <div id="metadata-loading" style="text-align: center; color: var(--text-light);">Loading metadata...</div>
+            </div>
+        </div>
+
         <div class="tool-grid">
             <!-- Merge PDFs -->
             <div class="tool-card" id="merge-tool">
@@ -1031,6 +1220,253 @@
             formData.append('dpi', dpi);
 
             callAPI('/api/pdf_to_images', formData, 'pdfimages');
+        }
+
+        // Global PDF Selection Functions
+        let selectedGlobalFile = null;
+
+        function handleGlobalPdfSelection() {
+            const input = document.getElementById('global-pdf-file');
+            const nameDisplay = document.getElementById('global-pdf-name');
+            const viewBtn = document.getElementById('view-pdf-btn');
+            const ocrBtn = document.getElementById('ocr-download-btn');
+            const metadataBtn = document.getElementById('metadata-btn');
+
+            if (input.files.length > 0) {
+                selectedGlobalFile = input.files[0];
+                nameDisplay.textContent = '✓ ' + selectedGlobalFile.name;
+                nameDisplay.style.display = 'block';
+                viewBtn.style.display = 'inline-block';
+                ocrBtn.style.display = 'inline-block';
+                metadataBtn.style.display = 'inline-block';
+                viewBtn.disabled = false;
+                ocrBtn.disabled = false;
+                metadataBtn.disabled = false;
+            } else {
+                selectedGlobalFile = null;
+                nameDisplay.style.display = 'none';
+                viewBtn.style.display = 'none';
+                ocrBtn.style.display = 'none';
+                metadataBtn.style.display = 'none';
+            }
+        }
+
+        function viewPDFInIframe() {
+            if (!selectedGlobalFile) {
+                alert('Please select a PDF file first');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const iframe = document.getElementById('pdf-preview-iframe');
+                const preview = document.getElementById('pdf-preview-section');
+                const message = document.getElementById('pdf-preview-message');
+                
+                // Create object URL for PDF
+                const blob = new Blob([e.target.result], { type: 'application/pdf' });
+                const url = URL.createObjectURL(blob);
+                
+                iframe.src = url;
+                iframe.classList.add('active');
+                message.style.display = 'none';
+                preview.classList.add('active');
+                
+                // Scroll to preview
+                preview.scrollIntoView({ behavior: 'smooth' });
+            };
+            reader.readAsArrayBuffer(selectedGlobalFile);
+        }
+
+        function closePDFPreview() {
+            const preview = document.getElementById('pdf-preview-section');
+            const iframe = document.getElementById('pdf-preview-iframe');
+            const message = document.getElementById('pdf-preview-message');
+            
+            iframe.src = '';
+            iframe.classList.remove('active');
+            message.style.display = 'block';
+            preview.classList.remove('active');
+        }
+
+        function toggleMetadataSection() {
+            if (!selectedGlobalFile) {
+                alert('Please select a PDF file first');
+                return;
+            }
+
+            const metadataTool = document.getElementById('metadata-tool');
+            if (metadataTool.style.display === 'none') {
+                metadataTool.style.display = 'block';
+                loadMetadata();
+                metadataTool.scrollIntoView({ behavior: 'smooth' });
+            } else {
+                metadataTool.style.display = 'none';
+            }
+        }
+
+        function loadMetadata() {
+            if (!selectedGlobalFile) return;
+
+            const formData = new FormData();
+            formData.append('file', selectedGlobalFile);
+
+            const content = document.getElementById('metadata-content');
+            content.innerHTML = '<div style="text-align: center; color: var(--text-light);">Loading metadata...</div>';
+
+            fetch('/api/get_metadata', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    content.innerHTML = `<div style="color: var(--error);">${data.error}</div>`;
+                    return;
+                }
+
+                // Display metadata fields
+                let html = '<div class="metadata-section">';
+                
+                const fields = {
+                    'Title': 'title',
+                    'Author': 'author',
+                    'Subject': 'subject',
+                    'Creator': 'creator',
+                    'Producer': 'producer',
+                    'Creation Date': 'creation_date',
+                    'Modification Date': 'modification_date'
+                };
+
+                for (let [label, key] of Object.entries(fields)) {
+                    const value = data[key] || '';
+                    html += `
+                        <div class="metadata-field">
+                            <label>${label}</label>
+                            <input type="text" id="meta-${key}" value="${value}" placeholder="Not set">
+                        </div>
+                    `;
+                }
+
+                html += '</div>';
+                html += `
+                    <div class="metadata-actions">
+                        <button class="btn btn-primary" onclick="updateMetadata()">💾 Save Changes</button>
+                        <button class="btn btn-secondary" onclick="downloadPDFWithMetadata()">📥 Download PDF</button>
+                    </div>
+                `;
+
+                content.innerHTML = html;
+            })
+            .catch(error => {
+                content.innerHTML = `<div style="color: var(--error);">Error loading metadata: ${error.message}</div>`;
+            });
+        }
+
+        function updateMetadata() {
+            if (!selectedGlobalFile) return;
+
+            const formData = new FormData();
+            formData.append('file', selectedGlobalFile);
+
+            const fields = ['title', 'author', 'subject', 'creator', 'producer'];
+            for (let field of fields) {
+                const input = document.getElementById('meta-' + field);
+                if (input && input.value) {
+                    formData.append(field, input.value);
+                }
+            }
+
+            fetch('/api/update_metadata', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Metadata updated successfully');
+                    loadMetadata();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(error => alert('Error updating metadata: ' + error.message));
+        }
+
+        function downloadPDFWithMetadata() {
+            if (!selectedGlobalFile) return;
+
+            const formData = new FormData();
+            formData.append('file', selectedGlobalFile);
+
+            const fields = ['title', 'author', 'subject', 'creator', 'producer'];
+            for (let field of fields) {
+                const input = document.getElementById('meta-' + field);
+                if (input && input.value) {
+                    formData.append(field, input.value);
+                }
+            }
+
+            fetch('/api/download_pdf_with_metadata', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.blob())
+            .then(blob => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'pdf_with_metadata.pdf';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            })
+            .catch(error => alert('Error downloading PDF: ' + error.message));
+        }
+
+        function downloadOCRAsText() {
+            if (!selectedGlobalFile) {
+                alert('Please select a PDF file first');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', selectedGlobalFile);
+
+            const statusDiv = document.createElement('div');
+            statusDiv.className = 'status info';
+            statusDiv.textContent = 'Processing OCR and extracting text...';
+            statusDiv.style.display = 'block';
+            document.body.appendChild(statusDiv);
+
+            fetch('/api/ocr_download_text', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.blob().then(blob => ({ blob, headers: response.headers }));
+                } else {
+                    throw new Error('Error processing PDF');
+                }
+            })
+            .then(({ blob, headers }) => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = selectedGlobalFile.name.replace('.pdf', '_ocr.txt');
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                statusDiv.remove();
+            })
+            .catch(error => {
+                statusDiv.textContent = 'Error: ' + error.message;
+                statusDiv.className = 'status error';
+                setTimeout(() => statusDiv.remove(), 5000);
+            });
         }
     </script>
 </body>
