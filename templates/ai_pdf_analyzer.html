@@ -37,6 +37,22 @@
         .header h1 {
             font-size: 24px;
             font-weight: 600;
+            flex: 1;
+        }
+
+        .header-home-link {
+            color: white;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.1);
+            transition: all 0.3s;
+            margin-right: 10px;
+            font-size: 13px;
+        }
+
+        .header-home-link:hover {
+            background: rgba(255,255,255,0.2);
         }
 
         .settings-btn {
@@ -627,13 +643,21 @@
 
             .header-actions {
                 width: 100%;
+                display: flex;
+                gap: 8px;
+            }
+
+            .header-home-link {
+                padding: 8px 12px;
+                font-size: 12px;
             }
 
             .settings-btn {
                 flex: 1;
-                min-width: 120px;
+                min-width: 0;
                 text-align: center;
                 padding: 8px 10px;
+                font-size: 12px;
             }
 
             .sidebar {
@@ -732,6 +756,7 @@
         <div class="header">
             <h1>🤖 ISHEEV PDF Toolkit</h1>
             <div class="header-actions">
+                <a href="/" class="header-home-link">← Home</a>
                 <button class="settings-btn" onclick="createNewSession()" title="Clear chat and start fresh">New Session</button>
                 <button class="settings-btn" onclick="openSettings()">Settings</button>
             </div>

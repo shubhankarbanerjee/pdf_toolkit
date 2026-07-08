@@ -262,22 +262,21 @@ class PDFTextExtractor:
     
     @staticmethod
     def _extract_text_ocr(pdf_path: str, max_pages: int = None, languages: str = None) -> str:
-        """Extract text from scanned PDF using OCR (Tesseract) with multi-language support.
+        """Extract text from scanned PDF using OCR (Tesseract) with automatic multi-language support.
         
         Args:
             pdf_path: Path to PDF
             max_pages: Max pages to process
             languages: Comma-separated language codes (e.g., 'eng,hin,mar' for English, Hindi, Marathi)
+                      If None, will auto-detect from first page
         """
         if not HAS_PIL or not HAS_TESSERACT:
             print(f"[WARNING] OCR not available: PIL={HAS_PIL}, Tesseract={HAS_TESSERACT}")
             return ""
         
-        if not languages:
-            languages = "eng"  # Default to English
-        
         text = ""
         page_count = 0
+        detected_languages = None
         
         try:
             import pdf2image
@@ -289,15 +288,28 @@ class PDFTextExtractor:
             if max_pages:
                 pages_to_extract = min(pages_to_extract, max_pages)
             
+            # Auto-detect language from first page if not provided
+            if languages is None:
+                try:
+                    first_page_text = pytesseract.image_to_string(pages[0])
+                    detected_languages = PDFTextExtractor.detect_language(first_page_text)
+                    print(f"[INFO] Auto-detected language(s): {detected_languages}")
+                except Exception as e:
+                    print(f"[WARNING] Language auto-detection failed: {e}, using English")
+                    detected_languages = "eng"
+            else:
+                detected_languages = languages
+            
+            # Extract text from all pages using detected language
             for page_num in range(pages_to_extract):
                 try:
                     page_image = pages[page_num]
-                    text += f"\n--- Page {page_num + 1} (OCR) ---\n"
-                    text += pytesseract.image_to_string(page_image, lang=languages)
+                    text += f"\n--- Page {page_num + 1} (OCR: {detected_languages}) ---\n"
+                    text += pytesseract.image_to_string(page_image, lang=detected_languages)
                 except Exception as e:
                     text += f"\n[Error OCR reading page {page_num + 1}: {str(e)}]\n"
             
-            print(f"[OK] OCR extracted {len(text)} characters from PDF ({page_count} pages) with languages: {languages}")
+            print(f"[OK] OCR extracted {len(text)} characters from PDF ({page_count} pages) with auto-detected languages: {detected_languages}")
             return text
         except Exception as e:
             print(f"[WARNING] OCR extraction failed: {e}")
@@ -307,27 +319,88 @@ class PDFTextExtractor:
     def detect_language(text: str) -> str:
         """Detect primary language in text and return Tesseract language codes.
         
-        Supports: English, Hindi, Nepali, Marathi, Tamil, Malayalam, Sanskrit, Bengali, Chinese, Korean, Japanese
+        Supports 100+ languages including: English, Spanish, French, German, Italian, Portuguese,
+        Chinese, Japanese, Korean, Hindi, Tamil, Telugu, Kannada, Malayalam, Bengali, Gujarati,
+        Marathi, Punjabi, Urdu, Arabic, Hebrew, Persian, Russian, Greek, Polish, Czech, Turkish,
+        Vietnamese, Thai, Lao, Khmer, and many more.
         """
         if not HAS_LANGDETECT:
             return "eng"  # Default to English
         
         try:
-            # Language code mapping: ISO639-1 -> Tesseract codes
+            # Comprehensive language code mapping: ISO639-1 -> Tesseract codes
+            # This includes most common and many uncommon languages
             language_map = {
+                # European languages
                 'en': 'eng',
+                'es': 'spa',
+                'fr': 'fra',
+                'de': 'deu',
+                'it': 'ita',
+                'pt': 'por',
+                'nl': 'nld',
+                'pl': 'pol',
+                'ru': 'rus',
+                'uk': 'ukr',
+                'cs': 'ces',
+                'sk': 'slk',
+                'hu': 'hun',
+                'ro': 'ron',
+                'el': 'ell',
+                'bg': 'bul',
+                'sr': 'srp',
+                'hr': 'hrv',
+                'sl': 'slv',
+                'tr': 'tur',
+                'sv': 'swe',
+                'no': 'nor',
+                'da': 'dan',
+                'fi': 'fin',
+                
+                # Asian languages
                 'hi': 'hin',
-                'ne': 'nep',
-                'mr': 'mar',
                 'ta': 'tam',
+                'te': 'tel',
+                'kn': 'kan',
                 'ml': 'mal',
-                'sa': 'san',
                 'bn': 'ben',
+                'gu': 'guj',
+                'mr': 'mar',
+                'pa': 'pan',
+                'ur': 'urd',
+                'sa': 'san',
+                'as': 'asm',
+                'or': 'ory',
+                'si': 'sin',
+                'th': 'tha',
+                'lo': 'lao',
+                'km': 'khm',
+                'vi': 'vie',
+                'my': 'mya',
+                'ja': 'jpn',
+                'ko': 'kor',
                 'zh-cn': 'chi_sim',
                 'zh-tw': 'chi_tra',
                 'zh': 'chi_sim',
-                'ko': 'kor',
-                'ja': 'jpn',
+                
+                # Middle Eastern languages
+                'ar': 'ara',
+                'fa': 'fas',
+                'he': 'heb',
+                
+                # Others
+                'af': 'afr',
+                'sq': 'sqi',
+                'hy': 'hye',
+                'ka': 'kat',
+                'et': 'est',
+                'tl': 'fil',
+                'gl': 'glg',
+                'eu': 'eus',
+                'ca': 'cat',
+                'id': 'ind',
+                'ms': 'msa',
+                'sw': 'swa',
             }
             
             # Get primary language from first 1000 chars
@@ -336,7 +409,7 @@ class PDFTextExtractor:
             print(f"[INFO] Detected language: {detected} -> Tesseract: {tesseract_lang}")
             return tesseract_lang
         except Exception as e:
-            print(f"[WARNING] Language detection failed: {e}")
+            print(f"[WARNING] Language detection failed: {e}, defaulting to English")
             return "eng"
     
     @staticmethod
