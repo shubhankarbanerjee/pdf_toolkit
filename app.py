@@ -22,7 +22,8 @@ from pdf_processor import (
     compress_pdf,
     pdf_page_count,
     pdf_to_images,
-    arrange_photos_on_a4_row
+    arrange_photos_on_a4_row,
+    extract_best_text_from_pdf
 )
 
 # Import PDF Differ
@@ -760,6 +761,9 @@ def analyze_pdf():
         file_id = data.get('file_id')
         session_id = data.get('session_id')
         provider = data.get('provider', 'gemini')
+        requested_lang = (data.get('lang') or 'auto').strip()
+        if requested_lang.lower() in {'', 'auto', 'detect'}:
+            requested_lang = None
         
         if not file_id or not session_id:
             return jsonify({'success': False, 'error': 'File ID and Session ID required'}), 400
@@ -805,11 +809,14 @@ def analyze_pdf():
                 max_pages=None,  # No limit - unlimited
                 db_manager=db_manager,
                 file_id=file_id,
-                use_ocr=True  # Enable OCR fallback for scanned PDFs
+                use_ocr=True,  # Enable OCR fallback for scanned PDFs
+                languages=requested_lang,
             )
         
         if not text_content:
             return jsonify({'success': False, 'error': 'Failed to extract text from file'}), 500
+
+        detected_language = requested_lang or PDFTextExtractor.detect_language(text_content[:1500])
         
         # Analyze with AI
         result = ai_analyzer.chat_with_context(
@@ -840,7 +847,9 @@ def analyze_pdf():
             'summary': result['response'],
             'provider': result['provider'],
             'pages': pdf_info.get('pages'),
-            'file_size': pdf_info['file_size']
+            'file_size': pdf_info['file_size'],
+            'ocr_language': requested_lang or 'auto',
+            'detected_language': detected_language,
         })
     
     except Exception as e:
@@ -1319,7 +1328,7 @@ def download_pdf_with_metadata():
 
 @app.route('/api/ocr_download_text', methods=['POST'])
 def ocr_download_text():
-    """Extract text from PDF using OCR and PdfPlumber, return as downloadable text file."""
+    """Extract text from PDF and return whichever output is better: pypdf or OCR."""
     try:
         if 'file' not in request.files:
             return jsonify({'error': 'PDF file is required'}), 400
@@ -1332,66 +1341,28 @@ def ocr_download_text():
         unique_id = str(uuid.uuid4())
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{unique_id}_{secure_filename(file.filename)}")
         file.save(file_path)
-        
-        extracted_text = []
-        
-        # Try using PdfPlumber first for better table and text extraction
-        if HAS_PDFPLUMBER:
-            try:
-                import pdfplumber
-                with pdfplumber.open(file_path) as pdf:
-                    for page_num, page in enumerate(pdf.pages, 1):
-                        extracted_text.append(f"\n{'='*60}\n")
-                        extracted_text.append(f"PAGE {page_num}\n")
-                        extracted_text.append(f"{'='*60}\n")
-                        
-                        # Extract regular text
-                        text = page.extract_text()
-                        if text:
-                            extracted_text.append(text)
-                        
-                        # Extract tables if present
-                        tables = page.extract_tables()
-                        if tables:
-                            extracted_text.append("\n\n--- TABLES ON THIS PAGE ---\n")
-                            for table_idx, table in enumerate(tables, 1):
-                                extracted_text.append(f"\nTable {table_idx}:\n")
-                                for row in table:
-                                    extracted_text.append(" | ".join(str(cell) if cell else "" for cell in row))
-                                    extracted_text.append("\n")
-            except Exception as e:
-                print(f"[WARNING] PdfPlumber extraction failed: {e}, falling back to OCR")
-        
-        # Fallback to OCR if PdfPlumber didn't work or didn't extract enough
-        if not extracted_text or len(''.join(extracted_text)) < 100:
-            if HAS_AI_ANALYZER:
-                try:
-                    extractor = PDFTextExtractor()
-                    text = extractor.extract_text(file_path)
-                    if text:
-                        extracted_text = [text]
-                except Exception as e:
-                    print(f"[WARNING] OCR extraction failed: {e}")
-        
-        # If still no text, try PyPDF2
-        if not extracted_text or len(''.join(extracted_text)) < 50:
-            if HAS_PYPDF2:
-                try:
-                    with open(file_path, 'rb') as f:
-                        pdf_reader = PyPDF2.PdfReader(f)
-                        for page_num, page in enumerate(pdf_reader.pages, 1):
-                            text = page.extract_text()
-                            if text:
-                                extracted_text.append(f"\n--- PAGE {page_num} ---\n")
-                                extracted_text.append(text)
-                except Exception as e:
-                    print(f"[WARNING] PyPDF2 extraction failed: {e}")
-        
-        # Combine all extracted text
-        final_text = ''.join(extracted_text)
+
+        requested_lang = (request.form.get('lang', 'auto') or 'auto').strip()
+        if requested_lang.lower() in {'', 'auto', 'detect'}:
+            requested_lang = None
+
+        best = extract_best_text_from_pdf(
+            file_path,
+            lang=requested_lang,
+            dpi=int(request.form.get('dpi', '300'))
+        )
+        final_text = best.get('text', '')
+        print(
+            f"[INFO] OCR text selection: method={best.get('method')} "
+            f"scores={best.get('scores')}"
+        )
         
         if not final_text.strip():
-            return jsonify({'error': 'No text could be extracted from the PDF'}), 400
+            return jsonify({
+                'error': 'No text could be extracted from the PDF. Ensure Tesseract OCR is installed and accessible, then retry.',
+                'method': best.get('method'),
+                'scores': best.get('scores')
+            }), 400
         
         # Return as downloadable text file
         output = io.BytesIO()

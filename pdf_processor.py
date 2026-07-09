@@ -6,6 +6,8 @@ Contains all PDF processing functions for the PDF Toolkit application.
 import os
 import io
 import sys
+import re
+import shutil
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -41,6 +43,216 @@ except ImportError:
     # We'll handle this gracefully - OCR functions will fail if not available
     Image = None
     pytesseract = None
+
+try:
+    from pdf2image import convert_from_path
+except ImportError:
+    convert_from_path = None
+
+
+def _configure_tesseract_binary():
+    """Set pytesseract executable path on Windows when Tesseract is installed but not in PATH."""
+    if pytesseract is None:
+        return
+
+    existing = shutil.which("tesseract")
+    if existing:
+        pytesseract.pytesseract.tesseract_cmd = existing
+        return
+
+    if os.name != 'nt':
+        return
+
+    common_paths = [
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe")
+    ]
+    for path in common_paths:
+        if path and os.path.exists(path):
+            pytesseract.pytesseract.tesseract_cmd = path
+            return
+
+
+def _preprocess_image_for_ocr(img):
+    """Improve OCR quality for scanned invoices/receipts."""
+    if Image is None:
+        return img
+
+    gray = img.convert('L')
+    gray = ImageOps.autocontrast(gray)
+    bw = gray.point(lambda x: 255 if x > 170 else 0, mode='1')
+    return bw.convert('L')
+
+
+def _render_pdf_pages_with_fitz(input_pdf_path, dpi=300):
+    """Render PDF pages to PIL images via PyMuPDF (fallback when pdf2image/poppler fails)."""
+    rendered_pages = []
+    doc = fitz.open(input_pdf_path)
+    try:
+        mat = fitz.Matrix(dpi / 72, dpi / 72)
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            rendered_pages.append(Image.open(io.BytesIO(pix.tobytes('png'))).convert('RGB'))
+    finally:
+        doc.close()
+
+    return rendered_pages
+
+
+_configure_tesseract_binary()
+
+
+def _score_extracted_text(text):
+    """Return a quality score for extracted text; higher is better."""
+    if not text:
+        return 0.0
+
+    stripped = text.strip()
+    if not stripped:
+        return 0.0
+
+    total_chars = len(stripped)
+    non_ws_chars = [c for c in stripped if not c.isspace()]
+    non_ws_len = len(non_ws_chars)
+    alnum_count = sum(1 for c in non_ws_chars if c.isalnum())
+    bad_char_count = stripped.count('\ufffd')
+    words = re.findall(r"[A-Za-z0-9_]+", stripped)
+    word_count = len(words)
+
+    alnum_ratio = (alnum_count / non_ws_len) if non_ws_len else 0.0
+    avg_word_len = (sum(len(w) for w in words) / word_count) if word_count else 0.0
+
+    score = 0.0
+    score += min(total_chars, 20000) * 0.05
+    score += min(word_count, 4000) * 0.8
+    score += alnum_ratio * 120.0
+    score += min(avg_word_len, 12.0) * 2.0
+    score -= bad_char_count * 6.0
+    return score
+
+
+def _extract_text_pypdf(input_pdf_path):
+    """Extract page-wise text from PDF using pypdf/PyPDF2."""
+    if not os.path.exists(input_pdf_path):
+        return ""
+
+    extracted = []
+    try:
+        with open(input_pdf_path, 'rb') as f:
+            reader = PdfReader(f)
+            for page_num, page in enumerate(reader.pages, 1):
+                page_text = page.extract_text() or ""
+                if page_text.strip():
+                    extracted.append(f"\n{'=' * 60}\n")
+                    extracted.append(f"PAGE {page_num} (PYPDF)\n")
+                    extracted.append(f"{'=' * 60}\n")
+                    extracted.append(page_text)
+                    extracted.append("\n")
+    except Exception as e:
+        print(f"[WARNING] pypdf extraction failed: {e}")
+        return ""
+
+    return ''.join(extracted)
+
+
+def _normalize_ocr_lang(lang):
+    if lang is None:
+        return 'eng'
+    normalized = str(lang).strip()
+    if not normalized or normalized.lower() in {'auto', 'detect'}:
+        return 'eng'
+    return normalized
+
+
+def _extract_text_pdf2image_ocr(input_pdf_path, lang=None, dpi=300):
+    """Extract page-wise text from PDF by OCR using pdf2image + pytesseract."""
+    if not os.path.exists(input_pdf_path):
+        return ""
+
+    if convert_from_path is None or Image is None or pytesseract is None:
+        if Image is None or pytesseract is None:
+            return ""
+
+    extracted = []
+    pages = None
+    try:
+        if convert_from_path is not None:
+            try:
+                pages = convert_from_path(input_pdf_path, dpi=dpi)
+            except Exception as e:
+                print(f"[WARNING] pdf2image conversion failed, falling back to PyMuPDF rendering: {e}")
+
+        if pages is None:
+            pages = _render_pdf_pages_with_fitz(input_pdf_path, dpi=dpi)
+
+        for page_num, page_img in enumerate(pages, 1):
+            clean_img = _preprocess_image_for_ocr(page_img)
+            try:
+                page_text = pytesseract.image_to_string(clean_img, lang=_normalize_ocr_lang(lang), config='--oem 3 --psm 6') or ""
+            except Exception as lang_error:
+                print(f"[WARNING] OCR with lang='{lang}' failed on page {page_num}, retrying with eng: {lang_error}")
+                page_text = pytesseract.image_to_string(clean_img, lang='eng', config='--oem 3 --psm 6') or ""
+
+            if page_text.strip():
+                extracted.append(f"\n{'=' * 60}\n")
+                extracted.append(f"PAGE {page_num} (OCR)\n")
+                extracted.append(f"{'=' * 60}\n")
+                extracted.append(page_text)
+                extracted.append("\n")
+    except Exception as e:
+        print(f"[WARNING] OCR text extraction failed: {e}")
+        return ""
+
+    return ''.join(extracted)
+
+
+def extract_best_text_from_pdf(input_pdf_path, lang=None, dpi=300):
+    """Choose the better text output between pypdf extraction and OCR extraction.
+
+    Returns:
+        dict: {
+            'text': str,
+            'method': 'pypdf' | 'ocr' | 'none',
+            'scores': {'pypdf': float, 'ocr': float}
+        }
+    """
+    pypdf_text = _extract_text_pypdf(input_pdf_path)
+    ocr_text = _extract_text_pdf2image_ocr(input_pdf_path, lang=lang, dpi=dpi)
+
+    pypdf_score = _score_extracted_text(pypdf_text)
+    ocr_score = _score_extracted_text(ocr_text)
+    pypdf_len = len((pypdf_text or '').strip())
+    ocr_len = len((ocr_text or '').strip())
+
+    if pypdf_score <= 0 and ocr_score <= 0:
+        return {
+            'text': '',
+            'method': 'none',
+            'scores': {'pypdf': pypdf_score, 'ocr': ocr_score}
+        }
+
+    # If direct extraction is very short and OCR has substantial content, prefer OCR.
+    if ocr_len >= 120 and pypdf_len < 80:
+        return {
+            'text': ocr_text,
+            'method': 'ocr',
+            'scores': {'pypdf': pypdf_score, 'ocr': ocr_score}
+        }
+
+    if ocr_score > pypdf_score:
+        return {
+            'text': ocr_text,
+            'method': 'ocr',
+            'scores': {'pypdf': pypdf_score, 'ocr': ocr_score}
+        }
+
+    return {
+        'text': pypdf_text,
+        'method': 'pypdf',
+        'scores': {'pypdf': pypdf_score, 'ocr': ocr_score}
+    }
 
 
 def merge_pdfs(pdf_path1, pdf_path2):
@@ -190,7 +402,7 @@ def split_pdf_by_size(input_pdf_path, max_size_mb=200):
     return output_files
 
 
-def ocr_page(page_num, page, dpi=150, lang='eng+hin'):
+def ocr_page(page_num, page, dpi=600, lang=None):
     """
     Perform OCR on a single PDF page.
     
@@ -215,8 +427,24 @@ def ocr_page(page_num, page, dpi=150, lang='eng+hin'):
         img_data = pix.tobytes("png")
         img = Image.open(io.BytesIO(img_data))
         
+        clean_img = _preprocess_image_for_ocr(img)
+
         # Get OCR data with bounding boxes
-        ocr_data = pytesseract.image_to_data(img, lang=lang, output_type=pytesseract.Output.DICT)
+        try:
+            ocr_data = pytesseract.image_to_data(
+                clean_img,
+                lang=_normalize_ocr_lang(lang),
+                config='--oem 3 --psm 6',
+                output_type=pytesseract.Output.DICT
+            )
+        except Exception:
+            # Fallback to English if the requested traineddata is unavailable.
+            ocr_data = pytesseract.image_to_data(
+                clean_img,
+                lang='eng',
+                config='--oem 3 --psm 6',
+                output_type=pytesseract.Output.DICT
+            )
         
         # Get page dimensions for coordinate scaling
         page_rect = page.rect
@@ -232,7 +460,7 @@ def ocr_page(page_num, page, dpi=150, lang='eng+hin'):
                 y = ocr_data['top'][i] * scale_y
                 w = ocr_data['width'][i] * scale_x
                 h = ocr_data['height'][i] * scale_y
-                conf = ocr_data['conf'][i]
+                conf = float(ocr_data['conf'][i])
                 
                 if conf > 30:
                     text_blocks.append({
@@ -240,6 +468,19 @@ def ocr_page(page_num, page, dpi=150, lang='eng+hin'):
                         'bbox': (x, y, x + w, y + h),
                         'confidence': conf
                     })
+
+        if not text_blocks:
+            # Coarse fallback: keep a searchable full-page text block.
+            try:
+                fallback_text = pytesseract.image_to_string(clean_img, lang=lang, config='--oem 3 --psm 6')
+            except Exception:
+                fallback_text = pytesseract.image_to_string(clean_img, lang='eng', config='--oem 3 --psm 6')
+            if fallback_text and fallback_text.strip():
+                text_blocks.append({
+                    'text': fallback_text,
+                    'bbox': (8, 8, page_rect.width - 8, page_rect.height - 8),
+                    'confidence': 35
+                })
         
         # Get optimized image
         output_pix = page.get_pixmap()
@@ -251,7 +492,7 @@ def ocr_page(page_num, page, dpi=150, lang='eng+hin'):
         return (page_num, [], None, False, str(e))
 
 
-def ocr_pdf_to_pdf(input_path, dpi=150, lang='eng+hin', max_workers=4):
+def ocr_pdf_to_pdf(input_path, dpi=150, lang=None, max_workers=4):
     """
     Create an OCR-processed PDF with searchable text layer.
     
@@ -342,7 +583,8 @@ def _process_page_result(new_doc, doc, page_num, text_blocks, image_bytes, succe
                         block['text'],
                         fontname=fontname,
                         fontsize=font_size,
-                        color=(0, 0, 0, 0)
+                        color=(0, 0, 0),
+                        render_mode=3
                     )
         else:
             src_page = doc[page_num]
@@ -350,7 +592,7 @@ def _process_page_result(new_doc, doc, page_num, text_blocks, image_bytes, succe
                 width=src_page.rect.width,
                 height=src_page.rect.height
             )
-            new_page.show_pdf_page(0, 0, src_page)
+            new_page.show_pdf_page(new_page.rect, doc, page_num)
             
     except Exception as e:
         print(f"Error processing page result: {e}")
@@ -360,7 +602,7 @@ def _process_page_result(new_doc, doc, page_num, text_blocks, image_bytes, succe
                 width=src_page.rect.width,
                 height=src_page.rect.height
             )
-            new_page.show_pdf_page(0, 0, src_page)
+            new_page.show_pdf_page(new_page.rect, doc, page_num)
         except Exception as e2:
             print(f"Fallback also failed: {e2}")
 
@@ -432,7 +674,7 @@ def split_odd_even_pdfs(input_pdf_path):
         return None, None
 
 
-def compress_pdf(input_path, dpi=100, lang='eng+hin'):
+def compress_pdf(input_path, dpi=100, lang=None):
     """
     Compress a PDF file by re-rendering pages at lower DPI and adding OCR text layer.
     This significantly reduces file size while maintaining readability.
@@ -485,7 +727,7 @@ def compress_pdf(input_path, dpi=100, lang='eng+hin'):
             # Add OCR text layer if available
             if Image is not None and pytesseract is not None:
                 try:
-                    ocr_data = pytesseract.image_to_data(img, lang=lang, output_type=pytesseract.Output.DICT)
+                    ocr_data = pytesseract.image_to_data(img, lang=_normalize_ocr_lang(lang), output_type=pytesseract.Output.DICT)
                     
                     page_rect = page.rect
                     scale_x = img_width / img.width
@@ -505,7 +747,8 @@ def compress_pdf(input_path, dpi=100, lang='eng+hin'):
                                 ocr_data['text'][i],
                                 fontname="helv",
                                 fontsize=font_size,
-                                color=(0, 0, 0, 0)
+                                color=(0, 0, 0),
+                                render_mode=3
                             )
                 except Exception:
                     pass  # Skip OCR if it fails

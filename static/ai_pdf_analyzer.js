@@ -7,6 +7,7 @@ let currentFile = null;
 let currentFileId = null;
 let sessionId = null;
 let currentContext = '';
+let ocrLanguagePreference = 'auto';
 
 const PROVIDER_RADIO_MAP = {
     gemini: 'gemini',
@@ -22,9 +23,59 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('Initializing AI PDF Analyzer...');
     checkDatabaseHealth();
     refreshProviderRadioAvailability();
+    restoreOcrLanguageSelection();
     setTimeout(initializeSession, 500);
     window.addEventListener('resize', setupCompactSettingsMode);
 });
+
+function restoreOcrLanguageSelection() {
+    const saved = localStorage.getItem('pdfAnalyzerOcrLanguage') || 'auto';
+    ocrLanguagePreference = saved;
+    const select = document.getElementById('ocrLanguageSelect');
+    if (select) {
+        select.value = saved;
+    }
+    updateOcrLanguageInfo(saved, false);
+}
+
+function getLanguageLabel(languageCode) {
+    const labels = {
+        auto: 'Auto detect',
+        eng: 'English',
+        'eng+hin': 'English + Hindi',
+        hin: 'Hindi',
+        ben: 'Bengali',
+        mar: 'Marathi',
+        guj: 'Gujarati',
+        tam: 'Tamil',
+        tel: 'Telugu',
+        urd: 'Urdu',
+        ara: 'Arabic',
+        jpn: 'Japanese',
+        chi_sim: 'Chinese (Simplified)',
+        chi_tra: 'Chinese (Traditional)',
+    };
+    return labels[languageCode] || languageCode || 'Unknown';
+}
+
+function updateOcrLanguageInfo(languageCode, detected = false) {
+    const info = document.getElementById('ocrLanguageInfo');
+    if (!info) return;
+
+    const label = getLanguageLabel(languageCode);
+    info.textContent = detected
+        ? `Detected language: ${label}`
+        : `OCR language: ${label}`;
+}
+
+function updateOcrLanguageSelection() {
+    const select = document.getElementById('ocrLanguageSelect');
+    if (!select) return;
+
+    ocrLanguagePreference = select.value || 'auto';
+    localStorage.setItem('pdfAnalyzerOcrLanguage', ocrLanguagePreference);
+    updateOcrLanguageInfo(ocrLanguagePreference, false);
+}
 
 function setupCompactSettingsMode() {
     const isCompact = window.matchMedia('(max-width: 600px)').matches;
@@ -437,6 +488,7 @@ function analyzePDF() {
     }
 
     const provider = document.querySelector('input[name="provider"]:checked').value;
+    const ocrLanguage = document.getElementById('ocrLanguageSelect')?.value || 'auto';
     document.getElementById('analyzeBtn').disabled = true;
     const numFiles = filesToAnalyze.length;
     document.getElementById('analyzeBtn').textContent = numFiles > 1 ? `Analyzing ${numFiles} PDFs...` : 'Analyzing...';
@@ -451,6 +503,7 @@ function analyzePDF() {
             file_id: primaryFileId,
             session_id: sessionId,
             provider: provider,
+            lang: ocrLanguage,
             additional_files: filesToAnalyze.slice(0, -1) // For future multi-PDF support
         })
     })
@@ -464,6 +517,12 @@ function analyzePDF() {
             renderSummaryInChat(data.summary);
             document.getElementById('messageInput').disabled = false;
             document.getElementById('sendBtn').disabled = false;
+
+            if (data.detected_language) {
+                updateOcrLanguageInfo(data.detected_language, true);
+            } else if (data.ocr_language) {
+                updateOcrLanguageInfo(data.ocr_language, false);
+            }
             
             // Generate dynamic title from file names and summary
             const summary = data.summary || '';

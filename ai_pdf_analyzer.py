@@ -159,9 +159,59 @@ class AIConfigManager:
 
 class PDFTextExtractor:
     """Extract text from PDF files with caching and OCR fallback support."""
+
+    @staticmethod
+    def _score_text_quality(text: str) -> float:
+        """Return a rough quality score for extracted text."""
+        if not text:
+            return 0.0
+
+        stripped = text.strip()
+        if not stripped:
+            return 0.0
+
+        non_ws_chars = [c for c in stripped if not c.isspace()]
+        non_ws_len = len(non_ws_chars)
+        alnum_count = sum(1 for c in non_ws_chars if c.isalnum())
+        bad_char_count = stripped.count('\ufffd')
+        words = [word for word in stripped.split() if any(ch.isalnum() for ch in word)]
+
+        alnum_ratio = (alnum_count / non_ws_len) if non_ws_len else 0.0
+        avg_word_len = (sum(len(w) for w in words) / len(words)) if words else 0.0
+
+        score = 0.0
+        score += min(len(stripped), 20000) * 0.05
+        score += min(len(words), 4000) * 0.8
+        score += alnum_ratio * 120.0
+        score += min(avg_word_len, 12.0) * 2.0
+        score -= bad_char_count * 6.0
+        return score
+
+    @staticmethod
+    def _resolve_ocr_language(languages: Optional[str], text_hint: str = "") -> str:
+        """Resolve the OCR language to use for Tesseract."""
+        if languages:
+            normalized = languages.strip()
+            if normalized and normalized.lower() not in {'auto', 'detect'}:
+                return normalized
+
+        if text_hint.strip():
+            try:
+                return PDFTextExtractor.detect_language(text_hint)
+            except Exception:
+                pass
+
+        return 'eng'
     
     @staticmethod
-    def extract_text(pdf_path: str, max_pages: int = None, db_manager=None, file_id: str = None, use_ocr: bool = False) -> str:
+    def extract_text(
+        pdf_path: str,
+        max_pages: int = None,
+        db_manager=None,
+        file_id: str = None,
+        use_ocr: bool = False,
+        languages: Optional[str] = None,
+    ) -> str:
         """
         Extract text from PDF file with optional caching and OCR fallback.
         
@@ -183,11 +233,18 @@ class PDFTextExtractor:
         
         # Try regular text extraction first
         text = PDFTextExtractor._extract_text_direct(pdf_path, max_pages)
+
+        if text.strip() and languages is None:
+            # Use the visible text layer to pick a language before we fall back to OCR.
+            languages = PDFTextExtractor._resolve_ocr_language(None, text[:1500])
         
         # If extraction yielded very little text (scanned PDF), try OCR
-        if len(text.strip()) < 200 and use_ocr:
-            print(f"[INFO] PDF appears to be scanned (extracted {len(text)} chars), attempting OCR...")
-            ocr_text = PDFTextExtractor._extract_text_ocr(pdf_path, max_pages)
+        direct_text_score = PDFTextExtractor._score_text_quality(text)
+        if use_ocr and (len(text.strip()) < 200 or direct_text_score < 80):
+            print(
+                f"[INFO] PDF appears to need OCR (extracted {len(text)} chars, score {direct_text_score:.1f}), attempting OCR..."
+            )
+            ocr_text = PDFTextExtractor._extract_text_ocr(pdf_path, lang=languages, max_pages=max_pages)
             # If OCR succeeds, use it; otherwise keep the original minimal text
             if ocr_text:
                 text = ocr_text
@@ -298,7 +355,7 @@ class PDFTextExtractor:
                     print(f"[WARNING] Language auto-detection failed: {e}, using English")
                     detected_languages = "eng"
             else:
-                detected_languages = languages
+                detected_languages = PDFTextExtractor._resolve_ocr_language(languages)
             
             # Extract text from all pages using detected language
             for page_num in range(pages_to_extract):
@@ -446,6 +503,24 @@ class PDFTextExtractor:
 
 class AIPDFAnalyzer:
     """Main AI PDF analyzer with multi-provider support."""
+
+    @staticmethod
+    def _prepare_ai_context(text: str, max_chars: int = 12000) -> str:
+        """Trim document text before sending it to an AI provider."""
+        if not text:
+            return ""
+
+        normalized = text.strip()
+        if len(normalized) <= max_chars:
+            return normalized
+
+        head_chars = int(max_chars * 0.75)
+        tail_chars = max_chars - head_chars
+        return (
+            normalized[:head_chars].rstrip()
+            + "\n\n[... truncated document excerpt for privacy/performance ...]\n\n"
+            + normalized[-tail_chars:].lstrip()
+        )
     
     def __init__(self, config_path: Optional[Path] = None):
         self.config_manager = AIConfigManager(config_path)
@@ -762,7 +837,7 @@ class AIPDFAnalyzer:
             Analysis result with summary
         """
         # Extract text from PDF
-        text = PDFTextExtractor.extract_text(pdf_path, max_pages=50)
+        text = PDFTextExtractor.extract_text(pdf_path, max_pages=50, use_ocr=True)
         
         if not text.strip():
             return {
@@ -780,11 +855,12 @@ class AIPDFAnalyzer:
                 }
             provider = available[0]
         
-        # Generate analysis with full document text (no character limit)
+        # Send only a bounded excerpt to the AI provider.
+        doc_context = self._prepare_ai_context(text)
         prompt = f"""
 Analyze the following document and provide a comprehensive summary:
 
-{text}
+    {doc_context}
 
 Provide:
 1. **Main Topic**: What is this document about?
@@ -800,17 +876,17 @@ Keep the summary concise and well-structured.
             print(f"[DEBUG] analyze_pdf: provider={provider}, initialized_flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}, ollama={self.ollama_available}")
             
             if provider == 'gemini' and self.gemini_initialized:
-                return self._analyze_with_gemini(prompt, text)
+                return self._analyze_with_gemini(prompt, doc_context)
             elif provider == 'openai' and self.openai_initialized:
-                return self._analyze_with_openai(prompt, text)
+                return self._analyze_with_openai(prompt, doc_context)
             elif provider == 'claude' and self.claude_initialized:
-                return self._analyze_with_claude(prompt, text)
+                return self._analyze_with_claude(prompt, doc_context)
             elif provider == 'groq' and self.groq_initialized:
-                return self._analyze_with_groq(prompt, text)
+                return self._analyze_with_groq(prompt, doc_context)
             elif provider == 'github' and self.github_initialized:
-                return self._analyze_with_github(prompt, text)
+                return self._analyze_with_github(prompt, doc_context)
             elif provider == 'ollama' and self.ollama_available:
-                return self._analyze_with_ollama(prompt, text)
+                return self._analyze_with_ollama(prompt, doc_context)
             else:
                 print(f"[ERROR] Provider {provider} not available or not initialized. Flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}, ollama={self.ollama_available}")
                 return {
@@ -1100,9 +1176,8 @@ Keep the summary concise and well-structured.
                 }
             provider = available[0]
         
-        # Use full document text for better analysis (no character limit)
-        # For large documents, provide complete text to maintain context
-        doc_context = context_text
+        # Send only a bounded excerpt to the AI provider.
+        doc_context = self._prepare_ai_context(context_text)
         
         prompt = f"""
 You are a helpful assistant analyzing a document. Answer the user's question based on the document content provided.
