@@ -268,7 +268,7 @@ class PDFTextExtractor:
             print(
                 f"[INFO] PDF appears to need OCR (extracted {len(text)} chars, score {direct_text_score:.1f}), attempting OCR..."
             )
-            ocr_text = PDFTextExtractor._extract_text_ocr(pdf_path, lang=languages, max_pages=max_pages)
+            ocr_text = PDFTextExtractor._extract_text_ocr(pdf_path, languages=languages, max_pages=max_pages)
             # If OCR succeeds, use it; otherwise keep the original minimal text
             if ocr_text:
                 text = ocr_text
