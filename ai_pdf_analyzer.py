@@ -322,10 +322,12 @@ class PDFTextExtractor:
                 for page_num in range(pages_to_extract):
                     try:
                         page = doc[page_num]
-                        text += f"\n--- Page {page_num + 1} ---\n"
-                        text += page.get_text()
+                        page_text = page.get_text() or ""
+                        if page_text.strip():
+                            text += f"\n--- Page {page_num + 1} ---\n"
+                            text += page_text
                     except Exception as e:
-                        text += f"\n[Error reading page {page_num + 1}: {str(e)}]\n"
+                        print(f"[WARNING] Error reading page {page_num + 1} via PyMuPDF: {e}")
                 
                 doc.close()
                 print(f"[OK] Extracted {len(text)} characters from PDF (PyMuPDF)")
@@ -348,10 +350,12 @@ class PDFTextExtractor:
                     for page_num in range(pages_to_extract):
                         try:
                             page = reader.pages[page_num]
-                            text += f"\n--- Page {page_num + 1} ---\n"
-                            text += page.extract_text()
+                            page_text = page.extract_text() or ""
+                            if page_text.strip():
+                                text += f"\n--- Page {page_num + 1} ---\n"
+                                text += page_text
                         except Exception as e:
-                            text += f"\n[Error reading page {page_num + 1}: {str(e)}]\n"
+                            print(f"[WARNING] Error reading page {page_num + 1} via PyPDF2: {e}")
                 
                 print(f"[OK] Extracted {len(text)} characters from PDF (PyPDF2)")
                 return text
