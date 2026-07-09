@@ -544,6 +544,64 @@
             border-color: #e5e7eb;
             color: #9ca3af;
         }
+
+        /* Collapse/Expand All toolbar */
+        .collapse-toolbar {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.75rem;
+            margin: 1rem 0 0.5rem;
+        }
+
+        .btn-toolbar {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            color: var(--primary);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .btn-toolbar:hover {
+            background: #eff6ff;
+            border-color: var(--primary);
+        }
+
+        /* Collapsible tool cards */
+        .tool-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .tool-card-header h3 {
+            margin-bottom: 0;
+        }
+
+        .toggle-icon {
+            flex-shrink: 0;
+            font-size: 0.8rem;
+            color: var(--text-light);
+            transition: transform 0.2s;
+        }
+
+        .tool-card.collapsed .toggle-icon {
+            transform: rotate(-90deg);
+        }
+
+        .tool-card-body {
+            margin-top: 0.85rem;
+        }
+
+        .tool-card.collapsed .tool-card-body {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -568,6 +626,10 @@
             </div>
             <div id="global-pdf-name" style="margin-top:0.75rem; display:none; font-weight:600; color:var(--primary);"></div>
             <p style="font-size:0.875rem; color:var(--text-light); margin-top:0.5rem;">This file is shared by all tools below — except Passport Photos and AI PDF Analyzer.</p>
+        </div>
+
+        <div class="collapse-toolbar">
+            <button class="btn-toolbar" id="toggle-all-btn" type="button">⬇️ Expand All</button>
         </div>
 
         <div class="tool-grid">
@@ -636,7 +698,7 @@
                 <div class="file-name" id="merge-file2-name"></div>
                 <p style="font-size:0.75rem; color:var(--text-light); margin-top:0.25rem;">This will be merged as the second file.</p>
                 
-                <button class="btn btn-primary" onclick="mergePDFs()" id="merge-btn">
+                <button class="btn btn-primary" onclick="mergePDFs()" id="merge-btn" disabled>
                     <span class="btn-text">Merge PDFs</span>
                 </button>
                 
@@ -665,7 +727,7 @@
                     </div>
                 </div>
                 
-                <button class="btn btn-primary" onclick="splitPDF()" id="split-btn">
+                <button class="btn btn-primary" onclick="splitPDF()" id="split-btn" disabled>
                     <span class="btn-text">Split PDF</span>
                 </button>
                 
@@ -687,7 +749,7 @@
 
                 <div class="selected-file-badge no-file" id="oddeven-file-badge">📄 No PDF selected above</div>
 
-                <button class="btn btn-primary" onclick="splitOddEven()" id="oddeven-btn">
+                <button class="btn btn-primary" onclick="splitOddEven()" id="oddeven-btn" disabled>
                     <span class="btn-text">Split Odd/Even Pages</span>
                 </button>
                 
@@ -704,7 +766,7 @@
 
             <!-- OCR PDF -->
             <div class="tool-card" id="ocr-tool">
-                <h3>🔍 OCR PDF</h3>
+                <h3>🔍 OCR Download PDF</h3>
                 <p class="description">Make scanned PDFs searchable with OCR text layer.</p>
 
                 <div class="selected-file-badge no-file" id="ocr-file-badge">📄 No PDF selected above</div>
@@ -730,7 +792,7 @@
                     </div>
                 </div>
                 
-                <button class="btn btn-primary" onclick="ocrPDF()" id="ocr-btn">
+                <button class="btn btn-primary" onclick="ocrPDF()" id="ocr-btn" disabled>
                     <span class="btn-text">Perform OCR</span>
                 </button>
                 
@@ -763,7 +825,7 @@
                     </div>
                 </div>
                 
-                <button class="btn btn-primary" onclick="compressPDF()" id="compress-btn">
+                <button class="btn btn-primary" onclick="compressPDF()" id="compress-btn" disabled>
                     <span class="btn-text">Compress PDF</span>
                 </button>
                 
@@ -811,7 +873,7 @@
                     </div>
                 </div>
 
-                <button class="btn btn-primary" onclick="convertPDFToImages()" id="pdfimages-btn">
+                <button class="btn btn-primary" onclick="convertPDFToImages()" id="pdfimages-btn" disabled>
                     <span class="btn-text">Convert to Images</span>
                 </button>
 
@@ -920,7 +982,7 @@
                     </ul>
                 </div>
 
-                <a href="/diff" class="btn btn-primary" style="display: block; margin-top: 1rem; text-decoration: none; text-align: center; background: #1e3a5f;">
+                <a href="/diff" class="btn btn-primary" style="display: block; margin-top: 1rem; text-decoration: none; text-align: center; ">
                     <span>Open PDF Diff</span>
                 </a>
             </div>
@@ -928,7 +990,8 @@
     </main>
 
     <footer class="footer">
-        <p>PDF Toolkit - Platform Independent PDF Processor</p>
+        <p>ISHEEV PDF Toolkit - Platform Independent PDF Processor</p>
+        <p style="margin-top: 0.5rem; font-size: 0.75rem;">Author: Shubhankar Banerjee | India</p>
         <p style="margin-top: 0.5rem; font-size: 0.75rem;">Works on Android, iPhone, Windows, Mac, and Linux</p>
     </footer>
 
@@ -1433,6 +1496,81 @@
                 status.style.display = 'block';
             });
         }
+    </script>
+
+    <script>
+        // Make every .tool-card collapsible: header (h3) stays visible,
+        // everything else is moved into a collapsible body.
+        (function () {
+            function setup() {
+                var cards = document.querySelectorAll('.tool-card');
+                var toggleAllBtn = document.getElementById('toggle-all-btn');
+
+                function updateToggleAllBtn() {
+                    if (!toggleAllBtn) return;
+                    var anyExpanded = Array.prototype.some.call(cards, function (card) {
+                        return !card.classList.contains('collapsed');
+                    });
+                    toggleAllBtn.textContent = anyExpanded ? '⬆️ Collapse All' : '⬇️ Expand All';
+                }
+
+                cards.forEach(function (card) {
+                    var h3 = card.querySelector('h3');
+                    if (!h3) return; // skip cards with no header
+
+                    var header = document.createElement('div');
+                    header.className = 'tool-card-header';
+
+                    // Move the h3 into the new header
+                    header.appendChild(h3);
+
+                    var icon = document.createElement('span');
+                    icon.className = 'toggle-icon';
+                    icon.textContent = '▼';
+                    header.appendChild(icon);
+
+                    var body = document.createElement('div');
+                    body.className = 'tool-card-body';
+
+                    // Move every remaining child of the card into the body
+                    while (card.firstChild) {
+                        body.appendChild(card.firstChild);
+                    }
+
+                    card.appendChild(header);
+                    card.appendChild(body);
+
+                    // Default state: collapsed
+                    card.classList.add('collapsed');
+
+                    header.addEventListener('click', function () {
+                        card.classList.toggle('collapsed');
+                        updateToggleAllBtn();
+                    });
+                });
+
+                if (toggleAllBtn) {
+                    toggleAllBtn.addEventListener('click', function () {
+                        var anyExpanded = Array.prototype.some.call(cards, function (card) {
+                            return !card.classList.contains('collapsed');
+                        });
+                        // If any card is expanded, collapse all. Otherwise expand all.
+                        cards.forEach(function (card) {
+                            card.classList.toggle('collapsed', anyExpanded);
+                        });
+                        updateToggleAllBtn();
+                    });
+                }
+
+                updateToggleAllBtn();
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', setup);
+            } else {
+                setup();
+            }
+        })();
     </script>
 </body>
 </html>
