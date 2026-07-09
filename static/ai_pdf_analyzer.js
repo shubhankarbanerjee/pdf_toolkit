@@ -566,6 +566,7 @@ function sendMessage() {
     }
 
     const provider = document.querySelector('input[name="provider"]:checked').value;
+    const additionalFiles = Array.from(selectedFiles).filter(fid => fid !== currentFileId);
 
     // Add user message to chat
     addMessage('user', message);
@@ -580,7 +581,8 @@ function sendMessage() {
             file_id: currentFileId,
             session_id: sessionId,
             message: message,
-            provider: provider
+            provider: provider,
+            additional_files: additionalFiles
         })
     })
     .then(r => r.json())

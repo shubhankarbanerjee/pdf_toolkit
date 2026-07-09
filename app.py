@@ -108,6 +108,89 @@ def allowed_image_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
 
 
+def _resolve_analysis_files(primary_file_id, session_id, additional_file_ids=None):
+    """Resolve and validate primary + additional files for AI analysis."""
+    if additional_file_ids is None:
+        additional_file_ids = []
+
+    ordered_ids = [primary_file_id] + [fid for fid in additional_file_ids if fid and fid != primary_file_id]
+    seen = set()
+    resolved = []
+
+    supported_exts = ('.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.txt')
+
+    for fid in ordered_ids:
+        if not fid or fid in seen:
+            continue
+        seen.add(fid)
+
+        pdf_info = db_manager.get_pdf(fid)
+        if not pdf_info:
+            raise ValueError(f"File not found: {fid}")
+        if pdf_info.get('session_id') != session_id:
+            raise PermissionError(f"File does not belong to session: {fid}")
+
+        source_name = (pdf_info.get('original_name') or str(pdf_info.get('file_path', ''))).lower()
+        if not source_name.endswith(supported_exts):
+            raise ValueError('Unsupported file type for AI analyzer. Please upload PDF, image, or TXT files only.')
+
+        resolved.append(pdf_info)
+
+    return resolved
+
+
+def _extract_context_for_file(pdf_info, requested_lang=None):
+    """Extract text context for a single file using cache when available."""
+    file_id = pdf_info.get('file_id')
+    file_path = pdf_info.get('file_path')
+    source_name = (pdf_info.get('original_name') or str(file_path)).lower()
+    txt_mode = source_name.endswith('.txt')
+
+    text_content = db_manager.get_cached_text(file_id)
+    if text_content:
+        return text_content
+
+    if txt_mode:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text_content = f.read()
+        except UnicodeDecodeError:
+            with open(file_path, 'r', encoding='latin-1', errors='ignore') as f:
+                text_content = f.read()
+        if text_content:
+            db_manager.cache_pdf_text(file_id, text_content, page_count=1)
+        return text_content or ''
+
+    return PDFTextExtractor.extract_text(
+        file_path,
+        max_pages=None,
+        db_manager=db_manager,
+        file_id=file_id,
+        use_ocr=True,
+        languages=requested_lang,
+    )
+
+
+def _build_combined_context(file_records, requested_lang=None):
+    """Build merged context and PDF path list for multi-file AI analysis."""
+    sections = []
+    pdf_paths = []
+
+    for record in file_records:
+        text = _extract_context_for_file(record, requested_lang=requested_lang)
+        if not text or not text.strip():
+            continue
+
+        original_name = record.get('original_name') or record.get('filename') or record.get('file_id')
+        sections.append(f"\n===== DOCUMENT: {original_name} =====\n{text}")
+
+        source_name = (record.get('original_name') or str(record.get('file_path', ''))).lower()
+        if source_name.endswith('.pdf'):
+            pdf_paths.append(record.get('file_path'))
+
+    return '\n\n'.join(sections), pdf_paths
+
+
 @app.route('/')
 def index():
     """Render the main page."""
@@ -761,6 +844,7 @@ def analyze_pdf():
         file_id = data.get('file_id')
         session_id = data.get('session_id')
         provider = data.get('provider', 'gemini')
+        additional_files = data.get('additional_files') or []
         requested_lang = (data.get('lang') or 'auto').strip()
         if requested_lang.lower() in {'', 'auto', 'detect'}:
             requested_lang = None
@@ -768,32 +852,22 @@ def analyze_pdf():
         if not file_id or not session_id:
             return jsonify({'success': False, 'error': 'File ID and Session ID required'}), 400
         
-        # Get PDF from database
-        pdf_info = db_manager.get_pdf(file_id)
-        if not pdf_info:
-            return jsonify({'success': False, 'error': 'File not found'}), 404
-        
-        if pdf_info['session_id'] != session_id:
-            return jsonify({'success': False, 'error': 'File does not belong to session'}), 403
-        
-        file_path = pdf_info['file_path']
+        try:
+            file_records = _resolve_analysis_files(file_id, session_id, additional_files)
+        except PermissionError as pe:
+            return jsonify({'success': False, 'error': str(pe)}), 403
+        except ValueError as ve:
+            return jsonify({'success': False, 'error': str(ve)}), 400
 
-        original_name = (pdf_info.get('original_name') or '').lower()
-        source_name = original_name or str(file_path).lower()
-        txt_mode = source_name.endswith('.txt')
+        combined_context, pdf_paths = _build_combined_context(file_records, requested_lang=requested_lang)
+        if not combined_context.strip():
+            return jsonify({'success': False, 'error': 'Failed to extract text from selected file(s)'}), 500
 
-        supported_exts = ('.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.txt')
-        if not source_name.endswith(supported_exts):
-            return jsonify({
-                'success': False,
-                'error': 'Unsupported file type for AI analyzer. Please upload PDF, image, or TXT files only.'
-            }), 400
-
-        # Analyze with AI using the PDF path so vision-capable providers can inspect page images.
-        result = ai_analyzer.analyze_pdf(
-            file_path,
-            provider=provider,
-            languages=requested_lang,
+        result = ai_analyzer.chat_with_context(
+            "Summarize these selected documents in a concise way, highlighting key points and important details.",
+            combined_context,
+            provider,
+            pdf_paths=pdf_paths,
         )
         
         if not result.get('success'):
@@ -809,16 +883,17 @@ def analyze_pdf():
             file_id=file_id,
             session_id=session_id,
             role='system',
-            content=result['summary'],
+            content=result['response'],
             provider=result['provider']
         )
         
         return jsonify({
             'success': True,
-            'summary': result['summary'],
+            'summary': result['response'],
             'provider': result['provider'],
-            'pages': pdf_info.get('pages'),
-            'file_size': pdf_info['file_size'],
+            'pages': sum((rec.get('pages') or 0) for rec in file_records),
+            'file_size': sum((rec.get('file_size') or 0) for rec in file_records),
+            'analyzed_files': len(file_records),
             'ocr_language': requested_lang or 'auto',
         })
     
@@ -839,55 +914,23 @@ def chat_pdf():
         session_id = data.get('session_id')
         message = data.get('message')
         provider = data.get('provider', 'gemini')
+        additional_files = data.get('additional_files') or []
         
         if not file_id or not session_id or not message:
             return jsonify({'success': False, 'error': 'File ID, Session ID, and message required'}), 400
         
-        # Get PDF from database
-        pdf_info = db_manager.get_pdf(file_id)
-        if not pdf_info:
-            return jsonify({'success': False, 'error': 'File not found'}), 404
-        
-        if pdf_info['session_id'] != session_id:
-            return jsonify({'success': False, 'error': 'File does not belong to session'}), 403
-        
-        # Validate supported AI analyzer file types
-        original_name = (pdf_info.get('original_name') or '').lower()
-        source_name = original_name or str(pdf_info.get('file_path', '')).lower()
-        txt_mode = source_name.endswith('.txt')
+        try:
+            file_records = _resolve_analysis_files(file_id, session_id, additional_files)
+        except PermissionError as pe:
+            return jsonify({'success': False, 'error': str(pe)}), 403
+        except ValueError as ve:
+            return jsonify({'success': False, 'error': str(ve)}), 400
 
-        supported_exts = ('.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.txt')
-        if not source_name.endswith(supported_exts):
-            return jsonify({
-                'success': False,
-                'error': 'Unsupported file type for AI analyzer. Please upload PDF, image, or TXT files only.'
-            }), 400
+        combined_context, pdf_paths = _build_combined_context(file_records)
+        if not combined_context.strip():
+            return jsonify({'success': False, 'error': 'Failed to extract text from selected file(s)'}), 500
 
-        # Get cached or extract PDF text
-        text_content = db_manager.get_cached_text(file_id)
-        if not text_content:
-            if txt_mode:
-                try:
-                    with open(pdf_info['file_path'], 'r', encoding='utf-8') as f:
-                        text_content = f.read()
-                except UnicodeDecodeError:
-                    with open(pdf_info['file_path'], 'r', encoding='latin-1', errors='ignore') as f:
-                        text_content = f.read()
-                if text_content:
-                    db_manager.cache_pdf_text(file_id, text_content, page_count=1)
-            else:
-                text_content = PDFTextExtractor.extract_text(
-                    pdf_info['file_path'],
-                    max_pages=None,
-                    db_manager=db_manager,
-                    file_id=file_id
-                )
-        
-        if not text_content:
-            return jsonify({'success': False, 'error': 'Failed to extract text from file'}), 500
-        
-        # Chat with context
-        result = ai_analyzer.chat_with_context(message, text_content, provider, pdf_path=pdf_info['file_path'])
+        result = ai_analyzer.chat_with_context(message, combined_context, provider, pdf_paths=pdf_paths)
         
         if not result.get('success'):
             return jsonify({

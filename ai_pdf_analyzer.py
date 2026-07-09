@@ -1186,6 +1186,7 @@ class AIPDFAnalyzer:
         context_text: str,
         provider: Optional[str] = None,
         pdf_path: Optional[str] = None,
+        pdf_paths: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Chat with AI about PDF content.
@@ -1222,7 +1223,15 @@ You are a helpful assistant analyzing a document. Answer the user's question bas
 Provide a clear, concise answer based on the document. If the answer is not in the document, say so.
 """
 
-        page_images = PDFTextExtractor.extract_page_images(pdf_path) if pdf_path else []
+        page_images: List[Image.Image] = []
+        if pdf_paths:
+            for path in pdf_paths:
+                try:
+                    page_images.extend(PDFTextExtractor.extract_page_images(path))
+                except Exception as e:
+                    print(f"[WARNING] Failed to extract page images from '{path}': {e}")
+        elif pdf_path:
+            page_images = PDFTextExtractor.extract_page_images(pdf_path)
         
         try:
             print(f"[DEBUG] chat_with_context: About to check provider conditions. Provider={provider}, initialized_flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}")
