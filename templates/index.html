@@ -545,6 +545,133 @@
             color: #9ca3af;
         }
 
+        /* PDF Preview box (View PDF tool) - the small, inline preview */
+        .pdf-preview-box {
+            display: none;
+            margin-top: 1rem;
+        }
+
+        .pdf-preview-box.active {
+            display: block;
+        }
+
+        /* Hidden while the iframe has been moved into the full-page modal */
+        .pdf-preview-box.detached .pdf-preview-inline-slot {
+            display: none;
+        }
+
+        .pdf-preview-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+            gap: 0.5rem;
+        }
+
+        .pdf-preview-label {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-light);
+        }
+
+        .pdf-preview-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .pdf-preview-action-btn {
+            background: #f1f5f9;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 2px 10px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            color: var(--text);
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .pdf-preview-action-btn:hover {
+            background: #e2e8f0;
+            border-color: var(--primary);
+        }
+
+        .pdf-preview-frame {
+            width: 100%;
+            height: 520px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            display: block;
+        }
+
+        /* Full-page PDF modal — lives as a direct child of <body>, completely
+           outside any card, so it is never affected by a transformed
+           ancestor (e.g. .tool-card:hover's translateY, which would otherwise
+           re-scope position:fixed and cause the flicker/mis-sizing bug). */
+        .pdf-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background: rgba(15, 23, 42, 0.9);
+            padding: 1.25rem;
+            box-sizing: border-box;
+        }
+
+        .pdf-modal-overlay.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pdf-modal-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+            gap: 0.5rem;
+            flex-shrink: 0;
+        }
+
+        .pdf-modal-label {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .pdf-modal-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .pdf-modal-action-btn {
+            background: #f1f5f9;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.4rem 0.9rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            color: var(--text);
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .pdf-modal-action-btn:hover {
+            background: #e2e8f0;
+            border-color: var(--primary);
+        }
+
+        .pdf-modal-body {
+            flex: 1 1 auto;
+            min-height: 0;
+        }
+
+        .pdf-modal-body iframe {
+            width: 100%;
+            height: 100%;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            display: block;
+        }
+
         /* Collapse/Expand All toolbar */
         .collapse-toolbar {
             display: flex;
@@ -642,12 +769,17 @@
                 <button class="btn btn-primary" onclick="viewPDFInIframe()" id="viewpdf-btn" disabled>
                     <span class="btn-text">View PDF</span>
                 </button>
-                <div id="pdf-preview-container" style="display:none; margin-top:1rem;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
-                        <span style="font-size:0.875rem; font-weight:600; color:var(--text-light);">PDF Preview</span>
-                        <button onclick="closePDFPreview()" style="background:#f1f5f9; border:1px solid var(--border); border-radius:4px; padding:2px 10px; cursor:pointer;">✕ Close</button>
+                <div id="pdf-preview-container" class="pdf-preview-box">
+                    <div class="pdf-preview-toolbar">
+                        <span class="pdf-preview-label">PDF Preview</span>
+                        <div class="pdf-preview-actions">
+                            <button type="button" class="pdf-preview-action-btn" id="pdf-preview-expand-btn" onclick="togglePDFPreviewExpand()">⛶ Expand</button>
+                            <button type="button" class="pdf-preview-action-btn" onclick="closePDFPreview()">✕ Close</button>
+                        </div>
                     </div>
-                    <iframe id="pdf-preview-iframe" style="width:100%; height:520px; border:1px solid var(--border); border-radius:8px;" title="PDF Preview"></iframe>
+                    <div id="pdf-preview-inline-slot" class="pdf-preview-inline-slot">
+                        <iframe id="pdf-preview-iframe" class="pdf-preview-frame" title="PDF Preview"></iframe>
+                    </div>
                 </div>
             </div>
 
@@ -995,6 +1127,20 @@
         <p style="margin-top: 0.5rem; font-size: 0.75rem;">Works on Android, iPhone, Windows, Mac, and Linux</p>
     </footer>
 
+    <!-- Full-page PDF modal: a body-level sibling on purpose, so it's never
+         nested inside a .tool-card (whose :hover transform would otherwise
+         re-scope position:fixed descendants and break/flicker the overlay). -->
+    <div id="pdf-preview-modal-overlay" class="pdf-modal-overlay">
+        <div class="pdf-modal-toolbar">
+            <span class="pdf-modal-label">PDF Preview</span>
+            <div class="pdf-modal-actions">
+                <button type="button" class="pdf-modal-action-btn" onclick="togglePDFPreviewExpand()">⤡ Collapse</button>
+                <button type="button" class="pdf-modal-action-btn" onclick="closePDFPreview()">✕ Close</button>
+            </div>
+        </div>
+        <div id="pdf-modal-iframe-slot" class="pdf-modal-body"></div>
+    </div>
+
     <script>
         // Update file name display
         function updateFileName(inputId, displayId) {
@@ -1327,7 +1473,7 @@
                 const iframe = document.getElementById('pdf-preview-iframe');
                 const blob = new Blob([e.target.result], { type: 'application/pdf' });
                 iframe.src = URL.createObjectURL(blob);
-                container.style.display = 'block';
+                container.classList.add('active');
                 container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             };
             reader.readAsArrayBuffer(selectedGlobalFile);
@@ -1336,8 +1482,45 @@
         function closePDFPreview() {
             const container = document.getElementById('pdf-preview-container');
             const iframe = document.getElementById('pdf-preview-iframe');
+            const inlineSlot = document.getElementById('pdf-preview-inline-slot');
+            const modal = document.getElementById('pdf-preview-modal-overlay');
+            const expandBtn = document.getElementById('pdf-preview-expand-btn');
+
             iframe.src = '';
-            container.style.display = 'none';
+            // Make sure the iframe always ends up back in its normal inline
+            // spot, whether Close was pressed from the card or the modal.
+            if (inlineSlot && iframe.parentElement !== inlineSlot) {
+                inlineSlot.appendChild(iframe);
+            }
+            modal.classList.remove('active');
+            container.classList.remove('active', 'detached');
+            if (expandBtn) expandBtn.textContent = '⛶ Expand';
+        }
+
+        function togglePDFPreviewExpand() {
+            const container = document.getElementById('pdf-preview-container');
+            const iframe = document.getElementById('pdf-preview-iframe');
+            const inlineSlot = document.getElementById('pdf-preview-inline-slot');
+            const modal = document.getElementById('pdf-preview-modal-overlay');
+            const modalSlot = document.getElementById('pdf-modal-iframe-slot');
+            const expandBtn = document.getElementById('pdf-preview-expand-btn');
+
+            const isExpanded = modal.classList.contains('active');
+
+            if (isExpanded) {
+                // Collapse: move the iframe back into the card's inline slot.
+                modal.classList.remove('active');
+                container.classList.remove('detached');
+                inlineSlot.appendChild(iframe);
+                if (expandBtn) expandBtn.textContent = '⛶ Expand';
+            } else {
+                // Expand: move the iframe into the full-page modal, which is
+                // a body-level element unaffected by any card's hover transform.
+                modalSlot.appendChild(iframe);
+                modal.classList.add('active');
+                container.classList.add('detached');
+                if (expandBtn) expandBtn.textContent = '⤡ Collapse';
+            }
         }
 
         function toggleMetadataSection() {
