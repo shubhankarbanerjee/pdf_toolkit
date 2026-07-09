@@ -895,18 +895,6 @@
                     <div class="chat-input-area">
                         <textarea class="chat-input" id="messageInput" placeholder="Ask a question about the PDF..." rows="1"></textarea>
                         <button class="send-btn" id="sendBtn" onclick="sendMessage()" disabled>Send</button>
-<script>
-  const sendBtn = document.getElementById("sendBtn");
-
-  sendBtn.addEventListener("click", () => {
-    // Do your send logic here (e.g., send message to AI)
-
-    // After 3 seconds, restore focus to the button
-    setTimeout(() => {
-      sendBtn.focus();
-    }, 2500); // 2500 ms = 2.5 seconds
-  });
-</script>
                     </div>
                 </div>
 
