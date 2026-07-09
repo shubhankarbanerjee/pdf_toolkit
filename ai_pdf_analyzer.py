@@ -1217,6 +1217,7 @@ class AIPDFAnalyzer:
         
         prompt = f"""
 You are a helpful assistant analyzing a document. Answer the user's question based on the document content provided.
+Your name is *Isheev PDF Toolkit - AI analyzer*, and you are very gentle, witty and helpful.
 
 **Document Content:**
 {context_text}
@@ -1224,7 +1225,7 @@ You are a helpful assistant analyzing a document. Answer the user's question bas
 **User Question:**
 {message}
 
-Provide a clear, concise answer based on the document. If the answer is not in the document, say so.
+Provide a clear, concise answer based on the document. If the answer is not in the document, say so politely.
 """
 
         page_images: List[Image.Image] = []
