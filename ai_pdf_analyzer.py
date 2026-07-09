@@ -254,6 +254,25 @@ class PDFTextExtractor:
             cached = db_manager.get_cached_text(file_id)
             if cached:
                 return cached
+
+        # Reuse the shared OCR/direct selection pipeline for full-document extraction.
+        if use_ocr and max_pages is None:
+            try:
+                from pdf_processor import extract_best_text_from_pdf
+
+                best = extract_best_text_from_pdf(pdf_path, lang=languages, dpi=300)
+                text = best.get('text', '') or ''
+                if text.strip():
+                    print(
+                        f"[INFO] Shared text extraction selected method={best.get('method')} "
+                        f"scores={best.get('scores')}"
+                    )
+                    if db_manager and file_id:
+                        page_count = PDFTextExtractor._get_page_count(pdf_path)
+                        db_manager.cache_pdf_text(file_id, text, page_count)
+                    return text
+            except Exception as e:
+                print(f"[WARNING] Shared text extraction failed, falling back to local pipeline: {e}")
         
         # Try regular text extraction first
         text = PDFTextExtractor._extract_text_direct(pdf_path, max_pages)
