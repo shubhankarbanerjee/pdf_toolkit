@@ -9,6 +9,7 @@ Features: Session management, PDF caching, unlimited file sizes
 """
 
 import json
+import io
 import os
 import hashlib
 from pathlib import Path
@@ -202,6 +203,29 @@ class PDFTextExtractor:
                 pass
 
         return 'eng'
+
+    @staticmethod
+    def extract_page_images(pdf_path: str, max_pages: int = None, dpi: int = 150) -> List[Image.Image]:
+        """Render PDF pages to PIL images for multimodal analysis."""
+        if not HAS_FITZ or not HAS_PIL or not os.path.exists(pdf_path):
+            return []
+
+        images: List[Image.Image] = []
+        doc = fitz.open(pdf_path)
+        try:
+            page_count = len(doc)
+            pages_to_extract = page_count if max_pages is None else min(page_count, max_pages)
+            matrix = fitz.Matrix(dpi / 72, dpi / 72)
+
+            for page_num in range(pages_to_extract):
+                page = doc[page_num]
+                pix = page.get_pixmap(matrix=matrix, alpha=False)
+                image = Image.open(io.BytesIO(pix.tobytes('png'))).convert('RGB')
+                images.append(image)
+        finally:
+            doc.close()
+
+        return images
     
     @staticmethod
     def extract_text(
@@ -503,24 +527,6 @@ class PDFTextExtractor:
 
 class AIPDFAnalyzer:
     """Main AI PDF analyzer with multi-provider support."""
-
-    @staticmethod
-    def _prepare_ai_context(text: str, max_chars: int = 12000) -> str:
-        """Trim document text before sending it to an AI provider."""
-        if not text:
-            return ""
-
-        normalized = text.strip()
-        if len(normalized) <= max_chars:
-            return normalized
-
-        head_chars = int(max_chars * 0.75)
-        tail_chars = max_chars - head_chars
-        return (
-            normalized[:head_chars].rstrip()
-            + "\n\n[... truncated document excerpt for privacy/performance ...]\n\n"
-            + normalized[-tail_chars:].lstrip()
-        )
     
     def __init__(self, config_path: Optional[Path] = None):
         self.config_manager = AIConfigManager(config_path)
@@ -825,7 +831,7 @@ class AIPDFAnalyzer:
             print(f"[ERROR] Failed to save model preference: {e}")
             return False
     
-    def analyze_pdf(self, pdf_path: str, provider: Optional[str] = None) -> Dict[str, Any]:
+    def analyze_pdf(self, pdf_path: str, provider: Optional[str] = None, languages: Optional[str] = None) -> Dict[str, Any]:
         """
         Analyze PDF and generate summary.
         
@@ -836,8 +842,8 @@ class AIPDFAnalyzer:
         Returns:
             Analysis result with summary
         """
-        # Extract text from PDF
-        text = PDFTextExtractor.extract_text(pdf_path, max_pages=50, use_ocr=True)
+        # Extract the full text layer, falling back to OCR when needed.
+        text = PDFTextExtractor.extract_text(pdf_path, max_pages=None, use_ocr=True, languages=languages)
         
         if not text.strip():
             return {
@@ -855,38 +861,36 @@ class AIPDFAnalyzer:
                 }
             provider = available[0]
         
-        # Send only a bounded excerpt to the AI provider.
-        doc_context = self._prepare_ai_context(text)
-        prompt = f"""
-Analyze the following document and provide a comprehensive summary:
+        prompt = """
+    Analyze the following PDF and provide a comprehensive summary using all available information.
 
-    {doc_context}
+    Provide:
+    1. **Main Topic**: What is this document about?
+    2. **Key Points**: 3-5 most important points
+    3. **Summary**: 2-3 paragraph executive summary
+    4. **Purpose**: What is the intended use of this document?
+    5. **Recommendations**: Any notable takeaways or actions
 
-Provide:
-1. **Main Topic**: What is this document about?
-2. **Key Points**: 3-5 most important points
-3. **Summary**: 2-3 paragraph executive summary
-4. **Purpose**: What is the intended use of this document?
-5. **Recommendations**: Any notable takeaways or actions
+    Keep the summary concise and well-structured.
+    """
 
-Keep the summary concise and well-structured.
-"""
+        page_images = PDFTextExtractor.extract_page_images(pdf_path)
         
         try:
             print(f"[DEBUG] analyze_pdf: provider={provider}, initialized_flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}, ollama={self.ollama_available}")
             
             if provider == 'gemini' and self.gemini_initialized:
-                return self._analyze_with_gemini(prompt, doc_context)
+                return self._analyze_with_gemini(prompt, text, page_images)
             elif provider == 'openai' and self.openai_initialized:
-                return self._analyze_with_openai(prompt, doc_context)
+                return self._analyze_with_openai(f"{prompt}\n\nFull document text:\n{text}", text)
             elif provider == 'claude' and self.claude_initialized:
-                return self._analyze_with_claude(prompt, doc_context)
+                return self._analyze_with_claude(f"{prompt}\n\nFull document text:\n{text}", text)
             elif provider == 'groq' and self.groq_initialized:
-                return self._analyze_with_groq(prompt, doc_context)
+                return self._analyze_with_groq(f"{prompt}\n\nFull document text:\n{text}", text)
             elif provider == 'github' and self.github_initialized:
-                return self._analyze_with_github(prompt, doc_context)
+                return self._analyze_with_github(f"{prompt}\n\nFull document text:\n{text}", text)
             elif provider == 'ollama' and self.ollama_available:
-                return self._analyze_with_ollama(prompt, doc_context)
+                return self._analyze_with_ollama(f"{prompt}\n\nFull document text:\n{text}", text)
             else:
                 print(f"[ERROR] Provider {provider} not available or not initialized. Flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}, ollama={self.ollama_available}")
                 return {
@@ -899,11 +903,16 @@ Keep the summary concise and well-structured.
                 'error': f'Analysis failed: {str(e)}'
             }
     
-    def _analyze_with_gemini(self, prompt: str, context: str) -> Dict[str, Any]:
+    def _analyze_with_gemini(self, prompt: str, context: str, images: Optional[List[Image.Image]] = None) -> Dict[str, Any]:
         """Analyze using Gemini."""
         try:
             model = genai.GenerativeModel(self.config['gemini']['model'])
-            response = model.generate_content(prompt)
+            contents: List[Any] = [prompt, f"Full document text:\n{context}"]
+            if images:
+                for index, image in enumerate(images, 1):
+                    contents.append(f"Page image {index}:")
+                    contents.append(image)
+            response = model.generate_content(contents)
             
             return {
                 'success': True,
@@ -1152,7 +1161,13 @@ Keep the summary concise and well-structured.
                 'error': f'Ollama analysis failed: {error_msg}'
             }
     
-    def chat_with_context(self, message: str, context_text: str, provider: Optional[str] = None) -> Dict[str, Any]:
+    def chat_with_context(
+        self,
+        message: str,
+        context_text: str,
+        provider: Optional[str] = None,
+        pdf_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Chat with AI about PDF content.
         
@@ -1176,27 +1191,29 @@ Keep the summary concise and well-structured.
                 }
             provider = available[0]
         
-        # Send only a bounded excerpt to the AI provider.
-        doc_context = self._prepare_ai_context(context_text)
-        
         prompt = f"""
 You are a helpful assistant analyzing a document. Answer the user's question based on the document content provided.
 
 **Document Content:**
-{doc_context}
+{context_text}
 
 **User Question:**
 {message}
 
 Provide a clear, concise answer based on the document. If the answer is not in the document, say so.
 """
+
+        page_images = PDFTextExtractor.extract_page_images(pdf_path) if pdf_path else []
         
         try:
             print(f"[DEBUG] chat_with_context: About to check provider conditions. Provider={provider}, initialized_flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}")
             
             if provider == 'gemini' and self.gemini_initialized:
                 model = genai.GenerativeModel(self.config['gemini']['model'])
-                response = model.generate_content(prompt)
+                contents: List[Any] = [prompt]
+                if page_images:
+                    contents.extend(page_images)
+                response = model.generate_content(contents)
                 return {
                     'success': True,
                     'response': response.text,

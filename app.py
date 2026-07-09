@@ -789,40 +789,11 @@ def analyze_pdf():
                 'error': 'Unsupported file type for AI analyzer. Please upload PDF, image, or TXT files only.'
             }), 400
 
-        # Extract text with database caching
-        if txt_mode:
-            cached_text = db_manager.get_cached_text(file_id)
-            if cached_text:
-                text_content = cached_text
-            else:
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        text_content = f.read()
-                except UnicodeDecodeError:
-                    with open(file_path, 'r', encoding='latin-1', errors='ignore') as f:
-                        text_content = f.read()
-                if text_content:
-                    db_manager.cache_pdf_text(file_id, text_content, page_count=1)
-        else:
-            text_content = PDFTextExtractor.extract_text(
-                file_path,
-                max_pages=None,  # No limit - unlimited
-                db_manager=db_manager,
-                file_id=file_id,
-                use_ocr=True,  # Enable OCR fallback for scanned PDFs
-                languages=requested_lang,
-            )
-        
-        if not text_content:
-            return jsonify({'success': False, 'error': 'Failed to extract text from file'}), 500
-
-        detected_language = requested_lang or PDFTextExtractor.detect_language(text_content[:1500])
-        
-        # Analyze with AI
-        result = ai_analyzer.chat_with_context(
-            f"Summarize this document in a concise way, highlighting key points, main topics, and important details:\n\n",
-            text_content,
-            provider
+        # Analyze with AI using the PDF path so vision-capable providers can inspect page images.
+        result = ai_analyzer.analyze_pdf(
+            file_path,
+            provider=provider,
+            languages=requested_lang,
         )
         
         if not result.get('success'):
@@ -838,18 +809,17 @@ def analyze_pdf():
             file_id=file_id,
             session_id=session_id,
             role='system',
-            content=result['response'],
+            content=result['summary'],
             provider=result['provider']
         )
         
         return jsonify({
             'success': True,
-            'summary': result['response'],
+            'summary': result['summary'],
             'provider': result['provider'],
             'pages': pdf_info.get('pages'),
             'file_size': pdf_info['file_size'],
             'ocr_language': requested_lang or 'auto',
-            'detected_language': detected_language,
         })
     
     except Exception as e:
@@ -917,7 +887,7 @@ def chat_pdf():
             return jsonify({'success': False, 'error': 'Failed to extract text from file'}), 500
         
         # Chat with context
-        result = ai_analyzer.chat_with_context(message, text_content, provider)
+        result = ai_analyzer.chat_with_context(message, text_content, provider, pdf_path=pdf_info['file_path'])
         
         if not result.get('success'):
             return jsonify({
