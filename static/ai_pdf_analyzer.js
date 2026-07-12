@@ -18,15 +18,61 @@ const PROVIDER_RADIO_MAP = {
     ollama: 'ollama',
 };
 
+const PROVIDERS_REQUIRING_KEYS = new Set(['gemini', 'openai', 'claude', 'groq', 'github']);
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Initializing AI PDF Analyzer...');
     checkDatabaseHealth();
     refreshProviderRadioAvailability();
+    promptForProviderSetupIfNeeded();
     restoreOcrLanguageSelection();
     setTimeout(initializeSession, 500);
     window.addEventListener('resize', setupCompactSettingsMode);
 });
+
+function promptForProviderSetupIfNeeded() {
+    fetch('/get_ai_config')
+        .then(r => r.json())
+        .then(config => {
+            const hasConfiguredProvider = Object.keys(PROVIDER_RADIO_MAP).some((provider) => {
+                if (provider === 'ollama') {
+                    return Boolean(config?.ollama?.enabled);
+                }
+                return Boolean(config?.[provider]?.enabled) && Boolean((config?.[provider]?.api_key || '').trim());
+            });
+
+            if (!hasConfiguredProvider) {
+                showStatus('info', 'Set your API keys for this browser session before running AI analysis.');
+                openSettings();
+            }
+        })
+        .catch(err => console.warn('Provider setup precheck failed:', err));
+}
+
+function ensureProviderReady(provider) {
+    return fetch('/get_ai_config')
+        .then(r => r.json())
+        .then(config => {
+            if (!PROVIDERS_REQUIRING_KEYS.has(provider)) {
+                return true;
+            }
+
+            const providerCfg = config?.[provider] || {};
+            const enabled = Boolean(providerCfg.enabled);
+            const apiKey = (providerCfg.api_key || '').trim();
+            if (!enabled || !apiKey) {
+                showStatus('error', `Please configure ${provider.toUpperCase()} API key for this browser session.`);
+                openSettings();
+                return false;
+            }
+            return true;
+        })
+        .catch(err => {
+            showStatus('error', `Could not verify provider setup: ${err.message}`);
+            return false;
+        });
+}
 
 function restoreOcrLanguageSelection() {
     const saved = localStorage.getItem('pdfAnalyzerOcrLanguage') || 'auto';
@@ -489,6 +535,10 @@ function analyzePDF() {
 
     const provider = document.querySelector('input[name="provider"]:checked').value;
     const ocrLanguage = document.getElementById('ocrLanguageSelect')?.value || 'auto';
+
+    ensureProviderReady(provider).then((ready) => {
+        if (!ready) return;
+
     document.getElementById('analyzeBtn').disabled = true;
     const numFiles = filesToAnalyze.length;
     document.getElementById('analyzeBtn').textContent = numFiles > 1 ? `Analyzing ${numFiles} PDFs...` : 'Analyzing...';
@@ -540,6 +590,9 @@ function analyzePDF() {
             loadChatHistory();
         } else {
             showStatus('error', data.error || 'Analysis failed');
+            if (data.requires_config) {
+                openSettings();
+            }
         }
         document.getElementById('analyzeBtn').disabled = false;
         document.getElementById('analyzeBtn').textContent = 'Analyze PDF';
@@ -548,6 +601,7 @@ function analyzePDF() {
         showStatus('error', err.message);
         document.getElementById('analyzeBtn').disabled = false;
         document.getElementById('analyzeBtn').textContent = 'Analyze PDF';
+    });
     });
 }
 
@@ -567,6 +621,9 @@ function sendMessage() {
 
     const provider = document.querySelector('input[name="provider"]:checked').value;
     const additionalFiles = Array.from(selectedFiles).filter(fid => fid !== currentFileId);
+
+    ensureProviderReady(provider).then((ready) => {
+        if (!ready) return;
 
     // Add user message to chat
     addMessage('user', message);
@@ -591,12 +648,16 @@ function sendMessage() {
             addMessage('ai', data.response);
         } else {
             addMessage('ai', `Error: ${data.error}`);
+            if (data.requires_config) {
+                openSettings();
+            }
         }
         document.getElementById('sendBtn').disabled = false;
     })
     .catch(err => {
         addMessage('ai', `Error: ${err.message}`);
         document.getElementById('sendBtn').disabled = false;
+    });
     });
 }
 
@@ -911,7 +972,7 @@ function saveSettings() {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            showStatus('success', 'Settings saved successfully');
+            showStatus('success', 'Settings saved for this browser session');
             refreshProviderRadioAvailability();
             closeSettings();
         } else {

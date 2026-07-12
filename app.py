@@ -7,6 +7,7 @@ import os
 import io
 import sys
 import uuid
+import copy
 import tempfile
 import traceback
 from pathlib import Path
@@ -189,6 +190,105 @@ def _build_combined_context(file_records, requested_lang=None):
             pdf_paths.append(record.get('file_path'))
 
     return '\n\n'.join(sections), pdf_paths
+
+
+SESSION_AI_CONFIG_KEY = 'ai_config_session'
+_AI_KEY_PROVIDERS = {'gemini', 'openai', 'claude', 'groq', 'github'}
+
+
+def _build_effective_ai_config():
+    """Build per-browser AI config from defaults + session overrides."""
+    base_config = ai_analyzer.config_manager.get_config() if ai_analyzer else {}
+    effective = copy.deepcopy(base_config)
+
+    # Do not inherit shared API keys across browser sessions.
+    for provider in _AI_KEY_PROVIDERS:
+        if provider in effective and isinstance(effective[provider], dict):
+            effective[provider]['api_key'] = ''
+            effective[provider]['enabled'] = False
+
+    session_cfg = session.get(SESSION_AI_CONFIG_KEY, {})
+    if not isinstance(session_cfg, dict):
+        session_cfg = {}
+
+    for provider, values in session_cfg.items():
+        if provider not in effective or not isinstance(values, dict):
+            continue
+        if not isinstance(effective[provider], dict):
+            effective[provider] = {}
+        effective[provider].update(values)
+
+    return effective
+
+
+def _create_session_ai_analyzer():
+    """Create an analyzer instance bound to the current browser session config."""
+    if not HAS_AI_ANALYZER:
+        return None
+
+    runtime_analyzer = AIPDFAnalyzer()
+    runtime_analyzer.config = _build_effective_ai_config()
+    runtime_analyzer._init_providers()
+    return runtime_analyzer
+
+
+def _provider_available(analyzer, provider):
+    """Return True when selected provider is configured for current session."""
+    return {
+        'gemini': analyzer.gemini_initialized,
+        'openai': analyzer.openai_initialized,
+        'claude': analyzer.claude_initialized,
+        'groq': analyzer.groq_initialized,
+        'github': analyzer.github_initialized,
+        'ollama': analyzer.ollama_available,
+    }.get(provider, False)
+
+
+def _sanitize_session_ai_config(config):
+    """Sanitize incoming AI config payload before storing in browser session."""
+    if not isinstance(config, dict):
+        return {}
+
+    base = ai_analyzer.config_manager.get_config() if ai_analyzer else {}
+    allowed = {
+        'gemini': {'api_key', 'enabled', 'model'},
+        'openai': {'api_key', 'enabled', 'model'},
+        'claude': {'api_key', 'enabled', 'model'},
+        'groq': {'api_key', 'enabled', 'model'},
+        'github': {'api_key', 'enabled', 'model', 'base_url'},
+        'ollama': {'enabled', 'model', 'host'},
+    }
+
+    sanitized = {}
+    for provider, fields in allowed.items():
+        incoming = config.get(provider, {}) if isinstance(config.get(provider), dict) else {}
+        provider_cfg = {}
+
+        # Keep base defaults for display-friendly fields.
+        base_provider = base.get(provider, {}) if isinstance(base.get(provider), dict) else {}
+        for k, v in base_provider.items():
+            if k in fields and k != 'api_key':
+                provider_cfg[k] = v
+
+        for key in fields:
+            if key not in incoming:
+                continue
+            value = incoming.get(key)
+            if key == 'enabled':
+                provider_cfg[key] = bool(value)
+            elif key == 'api_key':
+                provider_cfg[key] = str(value or '').strip()
+            else:
+                provider_cfg[key] = str(value or '').strip()
+
+        if provider in _AI_KEY_PROVIDERS:
+            key_val = provider_cfg.get('api_key', '')
+            if provider_cfg.get('enabled') and not key_val:
+                provider_cfg['enabled'] = False
+
+        sanitized[provider] = provider_cfg
+
+    return sanitized
 
 
 @app.route('/')
@@ -863,7 +963,16 @@ def analyze_pdf():
         if not combined_context.strip():
             return jsonify({'success': False, 'error': 'Failed to extract text from selected file(s)'}), 500
 
-        result = ai_analyzer.chat_with_context(
+        runtime_analyzer = _create_session_ai_analyzer()
+        if not _provider_available(runtime_analyzer, provider):
+            return jsonify({
+                'success': False,
+                'error': f'Provider "{provider}" is not configured for this browser session. Open AI Configuration and add your API key.',
+                'requires_config': True,
+                'provider': provider,
+            }), 400
+
+        result = runtime_analyzer.chat_with_context(
             "Summarize these selected documents in a concise way, highlighting key points and important details.",
             combined_context,
             provider,
@@ -930,7 +1039,16 @@ def chat_pdf():
         if not combined_context.strip():
             return jsonify({'success': False, 'error': 'Failed to extract text from selected file(s)'}), 500
 
-        result = ai_analyzer.chat_with_context(message, combined_context, provider, pdf_paths=pdf_paths)
+        runtime_analyzer = _create_session_ai_analyzer()
+        if not _provider_available(runtime_analyzer, provider):
+            return jsonify({
+                'success': False,
+                'error': f'Provider "{provider}" is not configured for this browser session. Open AI Configuration and add your API key.',
+                'requires_config': True,
+                'provider': provider,
+            }), 400
+
+        result = runtime_analyzer.chat_with_context(message, combined_context, provider, pdf_paths=pdf_paths)
         
         if not result.get('success'):
             return jsonify({
@@ -1105,21 +1223,12 @@ def _score_models_for_api(models: list[str]) -> str:
 
 @app.route('/get_ai_config', methods=['GET'])
 def get_ai_config():
-    """Get current AI configuration."""
+    """Get current AI configuration for this browser session."""
     if not HAS_AI_ANALYZER:
         return jsonify({'error': 'AI analyzer not available'}), 400
     
     try:
-        config = ai_analyzer.config_manager.get_config()
-
-        # If keys are provided via environment variables, expose provider as enabled
-        # in the UI without returning the secret itself.
-        env_groq = os.environ.get('GROQ_API_KEY', '').strip()
-        if env_groq:
-            config.setdefault('groq', {})
-            config['groq']['enabled'] = True
-            if not config['groq'].get('model'):
-                config['groq']['model'] = 'llama-3.3-70b-versatile'
+        config = _build_effective_ai_config()
 
         return jsonify(config)
     except Exception as e:
@@ -1128,20 +1237,15 @@ def get_ai_config():
 
 @app.route('/save_ai_config', methods=['POST'])
 def save_ai_config():
-    """Save AI configuration."""
+    """Save AI configuration for current browser session only."""
     if not HAS_AI_ANALYZER:
         return jsonify({'success': False, 'error': 'AI analyzer not available'}), 400
     
     try:
         config = request.get_json()
-        success = ai_analyzer.config_manager.save_config(config)
-        
-        if success:
-            # Reinitialize AI providers
-            ai_analyzer._init_providers()
-            return jsonify({'success': True})
-        else:
-            return jsonify({'success': False, 'error': 'Failed to save configuration'}), 500
+        session[SESSION_AI_CONFIG_KEY] = _sanitize_session_ai_config(config)
+        session.modified = True
+        return jsonify({'success': True, 'scope': 'browser_session'})
     
     except Exception as e:
         traceback.print_exc()
@@ -1155,9 +1259,10 @@ def get_ollama_models():
         return jsonify({'success': False, 'error': 'AI analyzer not available'}), 400
     
     try:
-        models = ai_analyzer.get_available_ollama_models()
-        current_model = ai_analyzer.ollama_model
-        available_ram = ai_analyzer._get_available_ram_gb()
+        runtime_analyzer = _create_session_ai_analyzer()
+        models = runtime_analyzer.get_available_ollama_models()
+        current_model = runtime_analyzer.ollama_model
+        available_ram = runtime_analyzer._get_available_ram_gb()
         
         return jsonify({
             'success': True,
@@ -1182,16 +1287,21 @@ def set_ollama_model():
         if not model_name:
             return jsonify({'success': False, 'error': 'Model name required'}), 400
         
-        success = ai_analyzer.set_ollama_model(model_name)
-        
-        if success:
-            return jsonify({
-                'success': True,
-                'message': f'Model set to {model_name}',
-                'current_model': ai_analyzer.ollama_model
-            })
-        else:
-            return jsonify({'success': False, 'error': 'Failed to set model'}), 500
+        session_cfg = session.get(SESSION_AI_CONFIG_KEY, {})
+        if not isinstance(session_cfg, dict):
+            session_cfg = {}
+        ollama_cfg = session_cfg.get('ollama', {}) if isinstance(session_cfg.get('ollama'), dict) else {}
+        ollama_cfg['model'] = model_name
+        session_cfg['ollama'] = ollama_cfg
+        session[SESSION_AI_CONFIG_KEY] = session_cfg
+        session.modified = True
+
+        return jsonify({
+            'success': True,
+            'message': f'Model set to {model_name}',
+            'current_model': model_name,
+            'scope': 'browser_session'
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
