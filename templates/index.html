@@ -738,6 +738,9 @@
     </header>
 
     <main class="container">
+        
+    <div class="tool-grid">
+
         <!-- Global PDF Selector -->
         <div class="pdf-selector-section">
             <h2>📁 Select a PDF File</h2>
@@ -778,6 +781,7 @@
                 </div>
             </div>
         </section>
+    </div>
 
         <div class="collapse-toolbar">
             <button class="btn-toolbar" id="toggle-all-btn" type="button">⬇️ Expand All</button>
@@ -785,61 +789,37 @@
 
         <div class="tool-grid">
 
-            <!-- PDF Metadata -->
-            <div class="tool-card" id="metadata-tool">
-                <h3>ℹ️ PDF Metadata</h3>
-                <p class="description">View and edit PDF header info: title, author, subject, creator. Download the updated PDF.</p>
-                <div class="selected-file-badge no-file" id="metadata-file-badge">📄 No PDF selected above</div>
-                <button class="btn btn-primary" onclick="loadMetadata()" id="metadata-btn" disabled>
-                    <span class="btn-text">Load Metadata</span>
+            <!-- Compress PDF -->
+            <div class="tool-card" id="compress-tool">
+                <h3>🗜️ Compress PDF</h3>
+                <p class="description">Reduce PDF file size with OCR text layer.</p>
+
+                <div class="selected-file-badge no-file" id="compress-file-badge">📄 No PDF selected above</div>
+
+                <div class="options">
+                    <div class="option-group">
+                        <label for="compress-dpi">Output Resolution (DPI)</label>
+                        <select id="compress-dpi">
+                            <option value="72">72 DPI (Smallest size)</option>
+                            <option value="100" selected>100 DPI (Small size)</option>
+                            <option value="150">150 DPI (Balanced)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <button class="btn btn-primary" onclick="compressPDF()" id="compress-btn" disabled>
+                    <span class="btn-text">Compress PDF</span>
                 </button>
-                <div id="metadata-content" style="margin-top:1rem; display:none;"></div>
-                <div class="status" id="metadata-status"></div>
-            </div>
-
-            <!-- Fill PDF Form -->
-            <div class="tool-card" id="fillform-tool">
-                <h3>🧾 Fill PDF form</h3>
-                <p class="description">Load form fields, edit values in a large text box, and download an updated filled PDF.</p>
-                <div class="selected-file-badge no-file" id="fillform-file-badge">📄 No PDF selected above</div>
-
-                <div class="metadata-actions" style="margin-top:0.5rem;">
-                    <button class="btn btn-primary" onclick="loadPdfFormFields()" id="fillform-load-btn" disabled>
-                        <span class="btn-text">Load Form Fields</span>
-                    </button>
+                
+                <div class="progress-container" id="compress-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <p class="progress-text">Processing...</p>
                 </div>
-
-                <div class="metadata-field" style="margin-top:0.9rem;">
-                    <label for="fillform-mapping">Field Mapping (use <code>Field : Value</code> with <code>;|;</code> or newline)</label>
-                    <textarea id="fillform-mapping" placeholder="Field1 : Value1 ;|; Field2 : Value2 ;|; Field3 : Value3
-or:
-Field1 : Value1
-Field2 : Value2
-Field3 : Value3" style="min-height:220px;"></textarea>
-                </div>
-
-                <div class="metadata-actions">
-                    <button class="btn btn-primary" onclick="downloadFilledPdfForm()" id="fillform-apply-btn" disabled>
-                        <span class="btn-text">📥 Download Filled PDF</span>
-                    </button>
-                </div>
-
-                <div class="status" id="fillform-status"></div>
-            </div>
-
-            <!-- OCR → Text Download -->
-            <div class="tool-card" id="ocrtext-tool">
-                <h3>📝 OCR → Download Text</h3>
-                <p class="description">Extract all text using PdfPlumber (handles tables) with OCR fallback. Download as .txt file.</p>
-                <div class="selected-file-badge no-file" id="ocrtext-file-badge">📄 No PDF selected above</div>
-                <button class="btn btn-primary" onclick="downloadOCRAsText()" id="ocrtext-btn" disabled>
-                    <span class="btn-text">Extract &amp; Download Text</span>
-                </button>
-                <div class="progress-container" id="ocrtext-progress">
-                    <div class="progress-bar"><div class="progress-fill"></div></div>
-                    <p class="progress-text">Extracting text...</p>
-                </div>
-                <div class="status" id="ocrtext-status"></div>
+                
+                <div class="status" id="compress-status"></div>
+                <div class="result-files" id="compress-result"></div>
             </div>
 
             <!-- Merge PDFs -->
@@ -906,10 +886,25 @@ Field3 : Value3" style="min-height:220px;"></textarea>
                 <div class="result-files" id="split-result"></div>
             </div>
 
+            <!-- OCR → Text Download -->
+            <div class="tool-card" id="ocrtext-tool">
+                <h3>📝 OCR → Download Text</h3>
+                <p class="description">Extract all text with OCR fallback.</p>
+                <div class="selected-file-badge no-file" id="ocrtext-file-badge">📄 No PDF selected above</div>
+                <button class="btn btn-primary" onclick="downloadOCRAsText()" id="ocrtext-btn" disabled>
+                    <span class="btn-text">Extract &amp; Download Text</span>
+                </button>
+                <div class="progress-container" id="ocrtext-progress">
+                    <div class="progress-bar"><div class="progress-fill"></div></div>
+                    <p class="progress-text">Extracting text...</p>
+                </div>
+                <div class="status" id="ocrtext-status"></div>
+            </div>
+
             <!-- Split Odd/Even -->
             <div class="tool-card" id="oddeven-tool">
                 <h3>📑 Split Odd/Even</h3>
-                <p class="description">Separate odd and even pages for duplex printing.</p>
+                <p class="description">Separate odd and even pages for duplex printing, using a simplex printer.</p>
 
                 <div class="selected-file-badge no-file" id="oddeven-file-badge">📄 No PDF selected above</div>
 
@@ -930,7 +925,7 @@ Field3 : Value3" style="min-height:220px;"></textarea>
 
             <!-- OCR PDF -->
             <div class="tool-card" id="ocr-tool">
-                <h3>🔍 OCR Download PDF</h3>
+                <h3>🔍 OCR → Download PDF</h3>
                 <p class="description">Make scanned PDFs searchable with OCR text layer.</p>
 
                 <div class="selected-file-badge no-file" id="ocr-file-badge">📄 No PDF selected above</div>
@@ -970,39 +965,49 @@ Field3 : Value3" style="min-height:220px;"></textarea>
                 <div class="status" id="ocr-status"></div>
                 <div class="result-files" id="ocr-result"></div>
             </div>
-
-            <!-- Compress PDF -->
-            <div class="tool-card" id="compress-tool">
-                <h3>🗜️ Compress PDF</h3>
-                <p class="description">Reduce PDF file size with OCR text layer.</p>
-
-                <div class="selected-file-badge no-file" id="compress-file-badge">📄 No PDF selected above</div>
-
-                <div class="options">
-                    <div class="option-group">
-                        <label for="compress-dpi">Output Resolution (DPI)</label>
-                        <select id="compress-dpi">
-                            <option value="72">72 DPI (Smallest size)</option>
-                            <option value="100" selected>100 DPI (Small size)</option>
-                            <option value="150">150 DPI (Balanced)</option>
-                        </select>
-                    </div>
-                </div>
-                
-                <button class="btn btn-primary" onclick="compressPDF()" id="compress-btn" disabled>
-                    <span class="btn-text">Compress PDF</span>
+            
+            <!-- PDF Metadata -->
+            <div class="tool-card" id="metadata-tool">
+                <h3>ℹ️ PDF Metadata</h3>
+                <p class="description">View and edit PDF header info: title, author, subject, creator. Download the updated PDF.</p>
+                <div class="selected-file-badge no-file" id="metadata-file-badge">📄 No PDF selected above</div>
+                <button class="btn btn-primary" onclick="loadMetadata()" id="metadata-btn" disabled>
+                    <span class="btn-text">Load Metadata</span>
                 </button>
-                
-                <div class="progress-container" id="compress-progress">
-                    <div class="progress-bar">
-                        <div class="progress-fill"></div>
-                    </div>
-                    <p class="progress-text">Processing...</p>
-                </div>
-                
-                <div class="status" id="compress-status"></div>
-                <div class="result-files" id="compress-result"></div>
+                <div id="metadata-content" style="margin-top:1rem; display:none;"></div>
+                <div class="status" id="metadata-status"></div>
             </div>
+
+            <!-- Fill PDF Form -->
+            <div class="tool-card" id="fillform-tool">
+                <h3>🧾 Fill PDF form</h3>
+                <p class="description">Load form fields, edit values in a large text box, and download an updated filled PDF.</p>
+                <div class="selected-file-badge no-file" id="fillform-file-badge">📄 No PDF selected above</div>
+
+                <div class="metadata-actions" style="margin-top:0.5rem;">
+                    <button class="btn btn-primary" onclick="loadPdfFormFields()" id="fillform-load-btn" disabled>
+                        <span class="btn-text">Load Form Fields</span>
+                    </button>
+                </div>
+
+                <div class="metadata-field" style="margin-top:0.9rem;">
+                    <label for="fillform-mapping">Field Mapping </label>
+                    <textarea id="fillform-mapping" placeholder="Field1 : Value1 ;|; Field2 : Value2 ;|; Field3 : Value3
+or:
+Field1 : Value1
+Field2 : Value2
+Field3 : Value3" style="min-height:220px;"></textarea>
+                </div>
+
+                <div class="metadata-actions">
+                    <button class="btn btn-primary" onclick="downloadFilledPdfForm()" id="fillform-apply-btn" disabled>
+                        <span class="btn-text">📥 Download Filled PDF</span>
+                    </button>
+                </div>
+
+                <div class="status" id="fillform-status"></div>
+            </div>
+
 
             <!-- PDF to Images -->
             <div class="tool-card" id="pdfimages-tool">
@@ -1129,7 +1134,7 @@ Field3 : Value3" style="min-height:220px;"></textarea>
             </div>
 
             <!-- PDF Diff -->
-            <div class="tool-card" id="diff-tool" style="border: 2px solid #1e3a5f; background: linear-gradient(135deg, rgba(30,58,95,0.05) 0%, rgba(45,106,159,0.05) 100%);">                
+            <div class="tool-card" id="diff-tool" >                
                 <div class="selected-file-badge no-file" id="diff-file-badge">📄 First PDF: No file selected above</div>
                 <h3>📄↔📄 PDF Diff</h3>
                 <p class="description">Compare two PDFs side-by-side. Highlights text changes, spelling differences, and image differences. Ignores compression and quality changes.</p>
