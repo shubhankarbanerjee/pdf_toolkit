@@ -10,6 +10,12 @@ import webbrowser
 import socket
 import time
 import threading
+import subprocess
+import shutil
+import re
+import atexit
+
+TUNNEL_URL_PATTERN = re.compile(r'https://[a-zA-Z0-9\-]+\.trycloudflare\.com')
 
 def get_local_ip():
     """Get the local IP address of this machine."""
@@ -26,6 +32,51 @@ def open_browser(url, delay=2):
     """Open the browser after a delay to allow the server to start."""
     time.sleep(delay)
     webbrowser.open(url)
+
+
+def start_cloudflare_tunnel(port):
+    """Start a Cloudflare quick tunnel for public internet access."""
+    if shutil.which('cloudflared') is None:
+        print('[WARNING] cloudflared not found in PATH. Skipping Cloudflare tunnel.')
+        print('          Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/')
+        return None, None
+
+    tunnel_cmd = [
+        'cloudflared', 'tunnel', '--url', f'http://localhost:{port}', '--no-autoupdate'
+    ]
+
+    try:
+        process = subprocess.Popen(
+            tunnel_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+    except Exception as e:
+        print(f'[WARNING] Failed to start Cloudflare tunnel: {e}')
+        return None, None
+
+    tunnel_url = None
+    start_time = time.time()
+    while time.time() - start_time < 12:
+        line = process.stdout.readline() if process.stdout else ''
+        if not line:
+            if process.poll() is not None:
+                break
+            continue
+        print(f'[Cloudflare] {line.strip()}')
+        match = TUNNEL_URL_PATTERN.search(line)
+        if match:
+            tunnel_url = match.group(0)
+            break
+
+    if tunnel_url:
+        print(f'[OK] Cloudflare tunnel ready: {tunnel_url}')
+    else:
+        print('[WARNING] Cloudflare tunnel started, but public URL not detected yet. Check cloudflared logs above.')
+
+    return process, tunnel_url
 
 def main():
     """Main function to start the PDF Toolkit application."""
@@ -53,6 +104,7 @@ def main():
     port = int(os.environ.get('PDF_TOOLKIT_PORT', '5000'))
     host = os.environ.get('PDF_TOOLKIT_HOST', '0.0.0.0')
     debug = os.environ.get('PDF_TOOLKIT_DEBUG', 'false').lower() == 'true'
+    enable_tunnel = os.environ.get('PDF_TOOLKIT_ENABLE_TUNNEL', 'true').lower() in ('1', 'true', 'yes', 'on')
     
     # Get local network info
     local_ip = get_local_ip()
@@ -61,6 +113,7 @@ def main():
     print(f"  Port: {port}")
     print(f"  Host: {host}")
     print(f"  Debug: {debug}")
+    print(f"  Cloudflare Tunnel: {enable_tunnel}")
     print()
     print("Access URLs:")
     print(f"  Local:   http://localhost:{port}")
@@ -83,6 +136,20 @@ def main():
     print("Press Ctrl+C to stop the server")
     print("=" * 60)
     print()
+
+    tunnel_process = None
+    tunnel_url = None
+    if enable_tunnel:
+        tunnel_process, tunnel_url = start_cloudflare_tunnel(port)
+        if tunnel_url:
+            print(f"  Public:  {tunnel_url}")
+            print()
+
+    def _cleanup_tunnel():
+        if tunnel_process and tunnel_process.poll() is None:
+            tunnel_process.terminate()
+
+    atexit.register(_cleanup_tunnel)
     
     # Open browser in a separate thread
     browser_thread = threading.Thread(target=open_browser, args=(f"http://localhost:{port}",))

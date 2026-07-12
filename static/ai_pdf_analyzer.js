@@ -201,7 +201,7 @@ function checkDatabaseHealth() {
 
 // Session Management
 function initializeSession() {
-    sessionId = localStorage.getItem('pdfAnalyzerSessionId');
+    sessionId = sessionStorage.getItem('pdfAnalyzerSessionId');
     
     if (!sessionId) {
         createNewSession();
@@ -211,67 +211,96 @@ function initializeSession() {
 }
 
 function createNewSession() {
-    // Keep same session but clear chat history
+    fetch('/create_session', {
+        method: 'POST'
+    })
+    .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+        return r.json();
+    })
+    .then(data => {
+        if (data.success) {
+            sessionId = data.session_id;
+            sessionStorage.setItem('pdfAnalyzerSessionId', sessionId);
+            updateSessionDisplay();
+            showStatus('success', `Session created: ${sessionId.substring(0, 8)}...`);
+        } else {
+            throw new Error(data.error || 'Failed to create session');
+        }
+    })
+    .catch(err => {
+        console.error('Session creation error:', err);
+        showStatus('error', `Session Error: ${err.message}`);
+        alert(`Failed to create session:\n${err.message}\n\nPlease check:\n1. Server is running\n2. Database is accessible`);
+    });
+}
+
+function clearChatHistory() {
     if (!sessionId) {
-        // If no session exists, create one
-        const createBtn = event?.target || document.querySelector('button[onclick="createNewSession()"]');
-        if (createBtn) createBtn.disabled = true;
-        
-        fetch('/create_session', {
-            method: 'POST'
-        })
+        showStatus('error', 'No active session');
+        return;
+    }
+
+    fetch(`/clear_chat/${sessionId}`, { method: 'POST' })
         .then(r => {
             if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
             return r.json();
         })
         .then(data => {
-            if (data.success) {
-                sessionId = data.session_id;
-                localStorage.setItem('pdfAnalyzerSessionId', sessionId);
-                updateSessionDisplay();
-                showStatus('success', `Session created: ${sessionId.substring(0, 8)}...`);
-            } else {
-                throw new Error(data.error || 'Failed to create session');
-            }
-        })
-        .catch(err => {
-            console.error('Session creation error:', err);
-            showStatus('error', `Session Error: ${err.message}`);
-            alert(`Failed to create session:\n${err.message}\n\nPlease check:\n1. Server is running\n2. Database is accessible`);
-        })
-        .finally(() => {
-            if (createBtn) createBtn.disabled = false;
-        });
-    } else {
-        // Clear chat history for existing session (keep PDFs)
-        const createBtn = event?.target || document.querySelector('button[onclick="createNewSession()"]');
-        if (createBtn) createBtn.disabled = true;
-        
-        fetch(`/clear_chat/${sessionId}`, {
-            method: 'POST'
-        })
-        .then(r => {
-            if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
-            return r.json();
-        })
-        .then(data => {
-            if (data.success) {
-                document.getElementById('chatMessages').innerHTML = '';
-                document.getElementById('emptyPlaceholder').style.display = 'flex';
-                document.getElementById('chatContainer').style.display = 'none';
-                showStatus('success', 'Chat cleared - PDFs retained');
-            } else {
+            if (!data.success) {
                 throw new Error(data.error || 'Failed to clear chat');
             }
+
+            document.getElementById('chatMessages').innerHTML = '';
+            document.getElementById('emptyPlaceholder').style.display = 'flex';
+            document.getElementById('chatContainer').style.display = 'none';
+            showStatus('success', 'Chat history cleared');
         })
         .catch(err => {
             console.error('Clear chat error:', err);
             showStatus('error', `Clear Error: ${err.message}`);
-        })
-        .finally(() => {
-            if (createBtn) createBtn.disabled = false;
         });
+}
+
+function clearAllPDFs() {
+    if (!sessionId) {
+        showStatus('error', 'No active session');
+        return;
     }
+
+    if (!confirm('Delete all PDFs from this browser session? This cannot be undone.')) {
+        return;
+    }
+
+    fetch(`/clear_pdfs/${sessionId}`, { method: 'POST' })
+        .then(r => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+            return r.json();
+        })
+        .then(data => {
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to clear PDFs');
+            }
+
+            uploadedFiles = {};
+            selectedFiles.clear();
+            currentFile = null;
+            currentFileId = null;
+            currentContext = '';
+
+            refreshFileList();
+            document.getElementById('chatTitle').textContent = 'Select a PDF to analyze';
+            document.getElementById('chatMessages').innerHTML = '';
+            document.getElementById('emptyPlaceholder').style.display = 'flex';
+            document.getElementById('chatContainer').style.display = 'none';
+            document.getElementById('analyzeBtn').disabled = true;
+
+            showStatus('success', `Deleted ${data.deleted_pdfs || 0} PDFs from this browser session`);
+        })
+        .catch(err => {
+            console.error('Clear PDFs error:', err);
+            showStatus('error', `Clear Error: ${err.message}`);
+        });
 }
 
 function loadSessionInfo() {
@@ -302,7 +331,7 @@ function loadSessionInfo() {
     .catch(err => {
         console.error('Session load failed:', err);
         console.log('Creating new session...');
-        localStorage.removeItem('pdfAnalyzerSessionId');
+        sessionStorage.removeItem('pdfAnalyzerSessionId');
         sessionId = null;
         createNewSession();
     });
@@ -319,7 +348,7 @@ function updateSessionDisplay() {
     
     const sessionDisplay = document.getElementById('sessionDisplay');
     if (sessionDisplay && sessionId) {
-        sessionDisplay.innerHTML = `Session: <code>${sessionId.substring(0, 8)}...</code> | <a href="#" onclick="createNewSession(); return false;" style="color: #667eea;">New Session</a>`;
+        sessionDisplay.innerHTML = `Session: <code>${sessionId.substring(0, 8)}...</code> (browser-scoped)`;
     }
 }
 
@@ -621,6 +650,7 @@ function sendMessage() {
 
     const provider = document.querySelector('input[name="provider"]:checked').value;
     const additionalFiles = Array.from(selectedFiles).filter(fid => fid !== currentFileId);
+    const ocrLanguage = document.getElementById('ocrLanguageSelect')?.value || 'auto';
 
     ensureProviderReady(provider).then((ready) => {
         if (!ready) return;
@@ -639,6 +669,7 @@ function sendMessage() {
             session_id: sessionId,
             message: message,
             provider: provider,
+            lang: ocrLanguage,
             additional_files: additionalFiles
         })
     })
@@ -871,6 +902,14 @@ function openSettings() {
         });
 }
 
+function openPremiumTools() {
+    document.getElementById('premiumToolsModal').classList.add('active');
+}
+
+function closePremiumTools() {
+    document.getElementById('premiumToolsModal').classList.remove('active');
+}
+
 function closeSettings() {
     document.getElementById('settingsModal').classList.remove('active');
 }
@@ -997,6 +1036,12 @@ function showStatus(type, message) {
 document.getElementById('settingsModal').addEventListener('click', function(e) {
     if (e.target === this) {
         closeSettings();
+    }
+});
+
+document.getElementById('premiumToolsModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closePremiumTools();
     }
 });
 

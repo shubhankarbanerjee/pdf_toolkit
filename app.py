@@ -162,6 +162,14 @@ def _extract_context_for_file(pdf_info, requested_lang=None):
             db_manager.cache_pdf_text(file_id, text_content, page_count=1)
         return text_content or ''
 
+    # Keep AI analyzer extraction aligned with OCR Download Text route.
+    best = extract_best_text_from_pdf(file_path, lang=requested_lang, dpi=300)
+    text_content = best.get('text', '') or ''
+    if text_content:
+        db_manager.cache_pdf_text(file_id, text_content, page_count=PDFTextExtractor._get_page_count(file_path))
+        return text_content
+
+    # Fallback to analyzer extractor when shared OCR pipeline returns empty text.
     return PDFTextExtractor.extract_text(
         file_path,
         max_pages=None,
@@ -289,6 +297,23 @@ def _sanitize_session_ai_config(config):
         sanitized[provider] = provider_cfg
 
     return sanitized
+
+
+def _bind_or_validate_browser_session(session_id):
+    """Bind analyzer session ID to current browser session, or validate existing binding."""
+    if not session_id:
+        return False, 'Session ID required'
+
+    bound_session_id = session.get('pdf_analyzer_session_id')
+    if not bound_session_id:
+        session['pdf_analyzer_session_id'] = session_id
+        session.modified = True
+        return True, None
+
+    if bound_session_id != session_id:
+        return False, 'Session ID does not match this browser session. Please start a new session.'
+
+    return True, None
 
 
 @app.route('/')
@@ -724,6 +749,8 @@ def create_session_route():
     try:
         session_id = str(uuid.uuid4())
         db_manager.create_session(session_id)
+        session['pdf_analyzer_session_id'] = session_id
+        session.modified = True
         
         return jsonify({
             'success': True,
@@ -741,8 +768,38 @@ def clear_chat(session_id):
         return jsonify({'success': False, 'error': 'Database not available'}), 400
     
     try:
+        ok, err = _bind_or_validate_browser_session(session_id)
+        if not ok:
+            return jsonify({'success': False, 'error': err}), 403
+
         db_manager.delete_chat_history(session_id)
         return jsonify({'success': True, 'message': 'Chat history cleared'})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/clear_pdfs/<session_id>', methods=['POST'])
+def clear_pdfs(session_id):
+    """Delete all PDFs and related chat records for a browser-bound analyzer session."""
+    if not HAS_DB:
+        return jsonify({'success': False, 'error': 'Database not available'}), 400
+
+    try:
+        ok, err = _bind_or_validate_browser_session(session_id)
+        if not ok:
+            return jsonify({'success': False, 'error': err}), 403
+
+        pdfs = db_manager.get_session_pdfs(session_id)
+        deleted = 0
+        for pdf in pdfs:
+            file_id = pdf.get('file_id')
+            if not file_id:
+                continue
+            db_manager.delete_pdf(file_id)
+            deleted += 1
+
+        return jsonify({'success': True, 'deleted_pdfs': deleted})
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -788,6 +845,10 @@ def get_session_info(session_id):
         return jsonify({'error': 'Database not available'}), 400
     
     try:
+        ok, err = _bind_or_validate_browser_session(session_id)
+        if not ok:
+            return jsonify({'error': err}), 403
+
         session_info = db_manager.get_session(session_id)
         if not session_info:
             return jsonify({'error': 'Session not found'}), 404
@@ -846,6 +907,10 @@ def upload_pdf():
         session_id = request.form.get('session_id')
         if not session_id:
             return jsonify({'success': False, 'error': 'Session ID required'}), 400
+
+        ok, err = _bind_or_validate_browser_session(session_id)
+        if not ok:
+            return jsonify({'success': False, 'error': err}), 403
         
         # Verify session exists
         if not db_manager.get_session(session_id):
@@ -951,6 +1016,10 @@ def analyze_pdf():
         
         if not file_id or not session_id:
             return jsonify({'success': False, 'error': 'File ID and Session ID required'}), 400
+
+        ok, err = _bind_or_validate_browser_session(session_id)
+        if not ok:
+            return jsonify({'success': False, 'error': err}), 403
         
         try:
             file_records = _resolve_analysis_files(file_id, session_id, additional_files)
@@ -1024,9 +1093,16 @@ def chat_pdf():
         message = data.get('message')
         provider = data.get('provider', 'gemini')
         additional_files = data.get('additional_files') or []
+        requested_lang = (data.get('lang') or 'auto').strip()
+        if requested_lang.lower() in {'', 'auto', 'detect'}:
+            requested_lang = None
         
         if not file_id or not session_id or not message:
             return jsonify({'success': False, 'error': 'File ID, Session ID, and message required'}), 400
+
+        ok, err = _bind_or_validate_browser_session(session_id)
+        if not ok:
+            return jsonify({'success': False, 'error': err}), 403
         
         try:
             file_records = _resolve_analysis_files(file_id, session_id, additional_files)
@@ -1035,7 +1111,7 @@ def chat_pdf():
         except ValueError as ve:
             return jsonify({'success': False, 'error': str(ve)}), 400
 
-        combined_context, pdf_paths = _build_combined_context(file_records)
+        combined_context, pdf_paths = _build_combined_context(file_records, requested_lang=requested_lang)
         if not combined_context.strip():
             return jsonify({'success': False, 'error': 'Failed to extract text from selected file(s)'}), 500
 
@@ -1086,6 +1162,10 @@ def get_chat_history(file_id):
         
         if not session_id:
             return jsonify({'error': 'Session ID required'}), 400
+
+        ok, err = _bind_or_validate_browser_session(session_id)
+        if not ok:
+            return jsonify({'error': err}), 403
         
         # Verify file belongs to session
         pdf_info = db_manager.get_pdf(file_id)

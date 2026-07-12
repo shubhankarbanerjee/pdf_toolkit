@@ -72,6 +72,49 @@
         .header-actions {
             display: flex;
             gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .header-action-link {
+            color: #fff;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            font-size: 13px;
+            opacity: 0.95;
+        }
+
+        .header-action-link:hover {
+            opacity: 1;
+        }
+
+        .tool-link-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .tool-link-card {
+            border: 1px solid #d9def7;
+            border-radius: 8px;
+            padding: 12px;
+            background: #f8faff;
+        }
+
+        .tool-link-card a {
+            color: #3049c7;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .tool-link-card a:hover {
+            text-decoration: underline;
+        }
+
+        .tool-link-card p {
+            margin-top: 6px;
+            font-size: 12px;
+            color: #4d5679;
         }
 
         .main-content {
@@ -716,6 +759,10 @@
                 font-size: 12px;
             }
 
+            .header-action-link {
+                font-size: 12px;
+            }
+
             .sidebar {
                 min-height: 200px;
                 max-height: 45vh;
@@ -813,8 +860,10 @@
             <h1>🤖 ISHEEV PDF Toolkit</h1>
             <div class="header-actions">
                 <a href="/" class="header-home-link">← Home</a>
-                <button class="settings-btn" onclick="createNewSession()" title="Clear chat and start fresh">New Session</button>
+                <a href="#" class="header-action-link" onclick="clearChatHistory(); return false;" title="Clear chat only">Clear chat</a>
+                <a href="#" class="header-action-link" onclick="clearAllPDFs(); return false;" title="Delete all uploaded PDFs for this browser session">Clear PDFs</a>
                 <button class="settings-btn" onclick="openSettings()">Settings</button>
+                <button class="settings-btn" onclick="openPremiumTools()">Premium tools</button>
             </div>
         </div>
 
@@ -904,6 +953,37 @@
                         <p>Upload a PDF to get started</p>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Premium Tools Modal -->
+    <div class="modal" id="premiumToolsModal">
+        <div class="modal-content">
+            <div class="modal-header">Premium tools</div>
+            <div class="modal-section">
+                <div class="section-title">AI PDF Analysis Tools</div>
+                <div class="tool-link-list">
+                    <div class="tool-link-card">
+                        <a href="https://notebooklm.google/" target="_blank" rel="noopener noreferrer">Google NotebookLM</a>
+                        <p>AI research tool and thinking partner. Helps present data in reports, PPT, or video-style outputs.</p>
+                    </div>
+                    <div class="tool-link-card">
+                        <a href="https://paperpal.com/home/chat-pdf" target="_blank" rel="noopener noreferrer">Editage Paperpal - Chat with Any PDF</a>
+                        <p>Academic-focused PDF chat and writing assistant workflow.</p>
+                    </div>
+                    <div class="tool-link-card">
+                        <a href="https://www.chatpdf.com/pdf-ai" target="_blank" rel="noopener noreferrer">ChatPDF - PDF AI</a>
+                        <p>Understand PDFs with AI in seconds with a simple upload-and-chat flow.</p>
+                    </div>
+                    <div class="tool-link-card">
+                        <a href="https://pdf.ai/" target="_blank" rel="noopener noreferrer">PDF.ai</a>
+                        <p>Chat with PDFs and use PDF APIs for parse, extract, and split operations.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-buttons">
+                <button class="btn btn-primary" onclick="closePremiumTools()">Close</button>
             </div>
         </div>
     </div>
