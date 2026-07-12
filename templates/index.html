@@ -1547,16 +1547,22 @@
                     contentDiv.innerHTML = `<div style="color:var(--error);">${data.error}</div>`;
                     return;
                 }
+                const toInputValue = (val) => String(val ?? '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
                 const editableFields = { 'Title': 'title', 'Author': 'author', 'Subject': 'subject', 'Creator': 'creator', 'Producer': 'producer' };
                 const readonlyFields = { 'Creation Date': 'creation_date', 'Modification Date': 'modification_date', 'Pages': 'pages' };
                 let html = '<div style="border-top:1px solid var(--border); margin-top:0.75rem; padding-top:0.75rem;">';
                 for (let [label, key] of Object.entries(editableFields)) {
-                    const val = data[key] || '';
-                    html += `<div class="metadata-field"><label>${label}</label><input type="text" id="meta-${key}" value="${val.replace(/"/g, '&quot;')}" placeholder="Not set"></div>`;
+                    const val = toInputValue(data[key]);
+                    html += `<div class="metadata-field"><label>${label}</label><input type="text" id="meta-${key}" value="${val}" placeholder="Not set"></div>`;
                 }
                 for (let [label, key] of Object.entries(readonlyFields)) {
-                    const val = data[key] || '';
-                    html += `<div class="metadata-field"><label>${label}</label><input type="text" value="${val.replace(/"/g, '&quot;')}" readonly style="background:#f9fafb; color:var(--text-light);"></div>`;
+                    const val = toInputValue(data[key]);
+                    html += `<div class="metadata-field"><label>${label}</label><input type="text" value="${val}" readonly style="background:#f9fafb; color:var(--text-light);"></div>`;
                 }
                 html += '</div>';
                 html += `<div class="metadata-actions">
