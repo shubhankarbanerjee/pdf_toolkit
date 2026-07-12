@@ -13,6 +13,8 @@ import socket
 import time
 import tempfile
 import argparse
+import importlib.util
+import shutil
 from pathlib import Path
 
 # Add the current directory to path
@@ -55,6 +57,12 @@ def check_dependencies():
         import pytesseract
     except ImportError:
         missing.append("Pillow and pytesseract (for OCR)")
+    else:
+        if shutil.which("tesseract") is None:
+            missing.append("Tesseract OCR executable (install and add to PATH)")
+
+    if importlib.util.find_spec("pdf2image") is None:
+        missing.append("pdf2image (for OCR text extraction)")
     
     return missing
 

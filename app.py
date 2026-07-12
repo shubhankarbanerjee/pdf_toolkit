@@ -299,6 +299,37 @@ def _sanitize_session_ai_config(config):
     return sanitized
 
 
+def _parse_form_mapping_text(mapping_text):
+    """Parse Field:Value mappings from ';|;' or newline-delimited input."""
+    if not mapping_text or not str(mapping_text).strip():
+        raise ValueError('No field mappings provided')
+
+    raw = str(mapping_text).strip().replace('\r\n', '\n').replace('\r', '\n')
+    chunks = raw.split(';|;') if ';|;' in raw else raw.split('\n')
+    entries = [chunk.strip() for chunk in chunks if chunk and chunk.strip()]
+
+    mappings = {}
+    for entry in entries:
+        if ':' not in entry:
+            raise ValueError(f'Invalid entry "{entry}". Use "Field : Value" format.')
+
+        field_name, value = entry.split(':', 1)
+        field_name = field_name.strip()
+        value = value.strip()
+
+        if not field_name:
+            raise ValueError(f'Field name is missing for value "{value}"')
+        if value == '':
+            raise ValueError(f'Value is not defined for field "{field_name}"')
+
+        mappings[field_name] = value
+
+    if not mappings:
+        raise ValueError('No valid field mappings found')
+
+    return mappings
+
+
 def _bind_or_validate_browser_session(session_id):
     """Bind analyzer session ID to current browser session, or validate existing binding."""
     if not session_id:
@@ -1421,6 +1452,95 @@ def get_metadata():
         
         return jsonify(result)
         
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/get_pdf_form_fields', methods=['POST'])
+def get_pdf_form_fields():
+    """Read fillable field names/values from a PDF form."""
+    if not HAS_PYPDF2:
+        return jsonify({'error': 'PyPDF2 not available'}), 400
+
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'PDF file is required'}), 400
+
+        file = request.files['file']
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'File must be a PDF'}), 400
+
+        reader = PyPDF2.PdfReader(file.stream)
+        fields = reader.get_fields() or {}
+
+        form_fields = []
+        for name, details in fields.items():
+            value = ''
+            try:
+                if isinstance(details, dict):
+                    raw_val = details.get('/V', '')
+                    value = '' if raw_val is None else str(raw_val)
+            except Exception:
+                value = ''
+            form_fields.append({'name': str(name), 'value': value})
+
+        return jsonify({'success': True, 'fields': form_fields})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/fill_pdf_form', methods=['POST'])
+def fill_pdf_form():
+    """Fill all PDF form fields from text mapping and return downloadable PDF."""
+    if not HAS_PYPDF2:
+        return jsonify({'error': 'PyPDF2 not available'}), 400
+
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'PDF file is required'}), 400
+
+        file = request.files['file']
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'File must be a PDF'}), 400
+
+        mapping_text = request.form.get('mapping_text', '')
+        try:
+            mappings = _parse_form_mapping_text(mapping_text)
+        except ValueError as ve:
+            return jsonify({'error': str(ve)}), 400
+
+        reader = PyPDF2.PdfReader(file.stream)
+        fields = reader.get_fields() or {}
+        if not fields:
+            return jsonify({'error': 'No fillable form fields were found in this PDF'}), 400
+
+        field_names = list(fields.keys())
+        for required_name in field_names:
+            if required_name not in mappings:
+                return jsonify({'error': f'Value is not defined for field "{required_name}"'}), 400
+
+        writer = PyPDF2.PdfWriter()
+        for page in reader.pages:
+            writer.add_page(page)
+
+        for page in writer.pages:
+            writer.update_page_form_field_values(page, mappings)
+
+        output = io.BytesIO()
+        writer.write(output)
+        output.seek(0)
+
+        original_name = secure_filename(file.filename or 'filled_form.pdf')
+        download_name = original_name.replace('.pdf', '_filled.pdf')
+
+        return send_file(
+            output,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=download_name
+        )
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500

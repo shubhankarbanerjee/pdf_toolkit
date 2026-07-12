@@ -755,33 +755,35 @@
             <p style="font-size:0.875rem; color:var(--text-light); margin-top:0.5rem;">This file is shared by all tools below — except Passport Photos and AI PDF Analyzer.</p>
         </div>
 
+        <!-- View PDF (kept close to selector for quick checks before tool operations) -->
+        <section class="pdf-preview-section active" id="viewpdf-tool">
+            <div class="pdf-preview-header">
+                <h3>👁️ View PDF</h3>
+            </div>
+            <p class="description">Preview the selected PDF directly in your browser without downloading.</p>
+            <div class="selected-file-badge no-file" id="viewpdf-file-badge">📄 No PDF selected above</div>
+            <button class="btn btn-primary" onclick="viewPDFInIframe()" id="viewpdf-btn" disabled>
+                <span class="btn-text">View PDF</span>
+            </button>
+            <div id="pdf-preview-container" class="pdf-preview-box">
+                <div class="pdf-preview-toolbar">
+                    <span class="pdf-preview-label">PDF Preview</span>
+                    <div class="pdf-preview-actions">
+                        <button type="button" class="pdf-preview-action-btn" id="pdf-preview-expand-btn" onclick="togglePDFPreviewExpand()">⛶ Expand</button>
+                        <button type="button" class="pdf-preview-action-btn" onclick="closePDFPreview()">✕ Close</button>
+                    </div>
+                </div>
+                <div id="pdf-preview-inline-slot" class="pdf-preview-inline-slot">
+                    <iframe id="pdf-preview-iframe" class="pdf-preview-frame" title="PDF Preview"></iframe>
+                </div>
+            </div>
+        </section>
+
         <div class="collapse-toolbar">
             <button class="btn-toolbar" id="toggle-all-btn" type="button">⬇️ Expand All</button>
         </div>
 
         <div class="tool-grid">
-
-            <!-- View PDF -->
-            <div class="tool-card" id="viewpdf-tool">
-                <h3>👁️ View PDF</h3>
-                <p class="description">Preview the selected PDF directly in your browser without downloading.</p>
-                <div class="selected-file-badge no-file" id="viewpdf-file-badge">📄 No PDF selected above</div>
-                <button class="btn btn-primary" onclick="viewPDFInIframe()" id="viewpdf-btn" disabled>
-                    <span class="btn-text">View PDF</span>
-                </button>
-                <div id="pdf-preview-container" class="pdf-preview-box">
-                    <div class="pdf-preview-toolbar">
-                        <span class="pdf-preview-label">PDF Preview</span>
-                        <div class="pdf-preview-actions">
-                            <button type="button" class="pdf-preview-action-btn" id="pdf-preview-expand-btn" onclick="togglePDFPreviewExpand()">⛶ Expand</button>
-                            <button type="button" class="pdf-preview-action-btn" onclick="closePDFPreview()">✕ Close</button>
-                        </div>
-                    </div>
-                    <div id="pdf-preview-inline-slot" class="pdf-preview-inline-slot">
-                        <iframe id="pdf-preview-iframe" class="pdf-preview-frame" title="PDF Preview"></iframe>
-                    </div>
-                </div>
-            </div>
 
             <!-- PDF Metadata -->
             <div class="tool-card" id="metadata-tool">
@@ -793,6 +795,36 @@
                 </button>
                 <div id="metadata-content" style="margin-top:1rem; display:none;"></div>
                 <div class="status" id="metadata-status"></div>
+            </div>
+
+            <!-- Fill PDF Form -->
+            <div class="tool-card" id="fillform-tool">
+                <h3>🧾 Fill PDF form</h3>
+                <p class="description">Load form fields, edit values in a large text box, and download an updated filled PDF.</p>
+                <div class="selected-file-badge no-file" id="fillform-file-badge">📄 No PDF selected above</div>
+
+                <div class="metadata-actions" style="margin-top:0.5rem;">
+                    <button class="btn btn-primary" onclick="loadPdfFormFields()" id="fillform-load-btn" disabled>
+                        <span class="btn-text">Load Form Fields</span>
+                    </button>
+                </div>
+
+                <div class="metadata-field" style="margin-top:0.9rem;">
+                    <label for="fillform-mapping">Field Mapping (use <code>Field : Value</code> with <code>;|;</code> or newline)</label>
+                    <textarea id="fillform-mapping" placeholder="Field1 : Value1 ;|; Field2 : Value2 ;|; Field3 : Value3
+or:
+Field1 : Value1
+Field2 : Value2
+Field3 : Value3" style="min-height:220px;"></textarea>
+                </div>
+
+                <div class="metadata-actions">
+                    <button class="btn btn-primary" onclick="downloadFilledPdfForm()" id="fillform-apply-btn" disabled>
+                        <span class="btn-text">📥 Download Filled PDF</span>
+                    </button>
+                </div>
+
+                <div class="status" id="fillform-status"></div>
             </div>
 
             <!-- OCR → Text Download -->
@@ -1395,6 +1427,7 @@
         const GLOBAL_TOOL_BADGES = [
             'viewpdf-file-badge',
             'metadata-file-badge',
+            'fillform-file-badge',
             'ocrtext-file-badge',
             'merge-file-badge',
             'split-file-badge',
@@ -1407,7 +1440,7 @@
 
         // IDs of buttons to enable/disable based on global file
         const GLOBAL_TOOL_BTNS = [
-            'viewpdf-btn', 'metadata-btn', 'ocrtext-btn',
+            'viewpdf-btn', 'metadata-btn', 'fillform-load-btn', 'fillform-apply-btn', 'ocrtext-btn',
             'merge-btn', 'split-btn', 'oddeven-btn',
             'ocr-btn', 'compress-btn', 'pdfimages-btn'
         ];
@@ -1440,6 +1473,10 @@
                     if (btn) btn.disabled = false;
                 });
 
+                // Keep Fill PDF form textarea in sync with selected document.
+                const mapping = document.getElementById('fillform-mapping');
+                if (mapping) mapping.value = '';
+
                 // Auto-fetch page count for PDF-to-Images
                 onPdfImagesFileChange();
 
@@ -1462,7 +1499,114 @@
                     const btn = document.getElementById(id);
                     if (btn) btn.disabled = true;
                 });
+
+                const mapping = document.getElementById('fillform-mapping');
+                if (mapping) mapping.value = '';
             }
+        }
+
+        function loadPdfFormFields() {
+            if (!selectedGlobalFile) {
+                showStatus('fillform-status', 'Please select a PDF file in the selector above', 'error');
+                return;
+            }
+
+            const status = document.getElementById('fillform-status');
+            const mapping = document.getElementById('fillform-mapping');
+            const loadBtn = document.getElementById('fillform-load-btn');
+            const applyBtn = document.getElementById('fillform-apply-btn');
+
+            hideStatus('fillform-status');
+            if (loadBtn) {
+                loadBtn.disabled = true;
+                loadBtn.querySelector('.btn-text').textContent = 'Loading...';
+            }
+
+            const formData = new FormData();
+            formData.append('file', selectedGlobalFile);
+
+            fetch('/api/get_pdf_form_fields', { method: 'POST', body: formData })
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    showStatus('fillform-status', '✗ ' + data.error, 'error');
+                    return;
+                }
+
+                const fields = Array.isArray(data.fields) ? data.fields : [];
+                if (!fields.length) {
+                    mapping.value = '';
+                    showStatus('fillform-status', '✗ No fillable form fields were found in this PDF.', 'error');
+                    return;
+                }
+
+                mapping.value = fields
+                    .map(f => `${f.name} : ${f.value || ''}`)
+                    .join('\n');
+                showStatus('fillform-status', `✓ Loaded ${fields.length} form fields. Edit values and click Download Filled PDF.`, 'success');
+                applyBtn.disabled = false;
+            })
+            .catch(err => {
+                showStatus('fillform-status', '✗ Error: ' + err.message, 'error');
+            })
+            .finally(() => {
+                if (loadBtn) {
+                    loadBtn.disabled = false;
+                    loadBtn.querySelector('.btn-text').textContent = 'Reload Form Fields';
+                }
+            });
+        }
+
+        function downloadFilledPdfForm() {
+            if (!selectedGlobalFile) {
+                showStatus('fillform-status', 'Please select a PDF file in the selector above', 'error');
+                return;
+            }
+
+            const mapping = document.getElementById('fillform-mapping').value || '';
+            if (!mapping.trim()) {
+                showStatus('fillform-status', 'Please enter field mappings before downloading.', 'error');
+                return;
+            }
+
+            const applyBtn = document.getElementById('fillform-apply-btn');
+            if (applyBtn) {
+                applyBtn.disabled = true;
+                applyBtn.querySelector('.btn-text').textContent = 'Filling...';
+            }
+
+            const formData = new FormData();
+            formData.append('file', selectedGlobalFile);
+            formData.append('mapping_text', mapping);
+
+            fetch('/api/fill_pdf_form', { method: 'POST', body: formData })
+            .then(async (response) => {
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.error || 'Failed to fill PDF form');
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = selectedGlobalFile.name.replace(/\.pdf$/i, '') + '_filled.pdf';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showStatus('fillform-status', '✓ Filled PDF downloaded successfully.', 'success');
+            })
+            .catch(err => {
+                showStatus('fillform-status', '✗ ' + err.message, 'error');
+            })
+            .finally(() => {
+                if (applyBtn) {
+                    applyBtn.disabled = false;
+                    applyBtn.querySelector('.btn-text').textContent = '📥 Download Filled PDF';
+                }
+            });
         }
 
         function viewPDFInIframe() {
