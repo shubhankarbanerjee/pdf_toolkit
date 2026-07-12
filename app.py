@@ -60,6 +60,13 @@ except ImportError:
     HAS_PYPDF2 = False
 
 try:
+    import fitz  # PyMuPDF
+    HAS_FITZ = True
+except ImportError:
+    print(f"[WARNING] PyMuPDF not available for annotation form handling")
+    HAS_FITZ = False
+
+try:
     import pdfplumber
     HAS_PDFPLUMBER = True
 except ImportError:
@@ -377,7 +384,72 @@ def _collect_editable_pdf_form_fields(reader):
             except Exception:
                 continue
 
-    return [{'name': k, 'value': v} for k, v in collected.items()]
+    return [{'name': k, 'value': v, 'source': 'form'} for k, v in collected.items()]
+
+
+def _collect_editable_annotation_fields(pdf_bytes):
+    """Collect editable annotation content as pseudo form fields."""
+    if not HAS_FITZ:
+        return []
+
+    fields = []
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype='pdf')
+    except Exception:
+        return []
+
+    try:
+        for page_index in range(len(doc)):
+            page = doc[page_index]
+            annots = list(page.annots() or [])
+            for annot_index, annot in enumerate(annots, start=1):
+                try:
+                    info = annot.info or {}
+                    content = (info.get('content') or '').strip()
+                    if content == '':
+                        continue
+
+                    fields.append({
+                        'name': f'Annotation|Page {page_index + 1}|#{annot_index}',
+                        'value': content,
+                        'source': 'annotation',
+                        'page_index': page_index,
+                        'annotation_index': annot_index,
+                    })
+                except Exception:
+                    continue
+    finally:
+        doc.close()
+
+    return fields
+
+
+def _apply_annotation_updates(pdf_bytes, mapping_by_name):
+    """Apply updated annotation content using names from _collect_editable_annotation_fields."""
+    if not HAS_FITZ:
+        return pdf_bytes
+
+    doc = fitz.open(stream=pdf_bytes, filetype='pdf')
+    try:
+        for page_index in range(len(doc)):
+            page = doc[page_index]
+            annots = list(page.annots() or [])
+            for annot_index, annot in enumerate(annots, start=1):
+                key = f'Annotation|Page {page_index + 1}|#{annot_index}'
+                if key not in mapping_by_name:
+                    continue
+
+                try:
+                    annot.set_info(content=str(mapping_by_name[key]))
+                    annot.update()
+                except Exception:
+                    continue
+
+        output = doc.tobytes()
+    finally:
+        doc.close()
+
+    return output
 
 
 def _bind_or_validate_browser_session(session_id):
@@ -1521,10 +1593,12 @@ def get_pdf_form_fields():
         if not allowed_file(file.filename):
             return jsonify({'error': 'File must be a PDF'}), 400
 
-        reader = PyPDF2.PdfReader(file.stream)
+        pdf_bytes = file.read()
+        reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
         form_fields = _collect_editable_pdf_form_fields(reader)
+        annotation_fields = _collect_editable_annotation_fields(pdf_bytes)
 
-        return jsonify({'success': True, 'fields': form_fields})
+        return jsonify({'success': True, 'fields': form_fields + annotation_fields})
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -1550,32 +1624,47 @@ def fill_pdf_form():
         except ValueError as ve:
             return jsonify({'error': str(ve)}), 400
 
-        reader = PyPDF2.PdfReader(file.stream)
+        pdf_bytes = file.read()
+        reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
         form_fields = _collect_editable_pdf_form_fields(reader)
-        if not form_fields:
-            return jsonify({'error': 'No fillable form fields were found in this PDF'}), 400
+        annotation_fields = _collect_editable_annotation_fields(pdf_bytes)
+        all_fields = form_fields + annotation_fields
+        if not all_fields:
+            return jsonify({'error': 'No fillable form fields or editable annotations were found in this PDF'}), 400
 
-        field_names = [f.get('name') for f in form_fields if f.get('name')]
+        field_names = [f.get('name') for f in all_fields if f.get('name')]
         for required_name in field_names:
             if required_name not in mappings:
                 return jsonify({'error': f'Value is not defined for field "{required_name}"'}), 400
 
+        # Fill AcroForm fields first using PyPDF2.
         writer = PyPDF2.PdfWriter()
         for page in reader.pages:
             writer.add_page(page)
 
+        form_mappings = {
+            f['name']: mappings[f['name']]
+            for f in form_fields
+            if f.get('name') in mappings
+        }
+
         for page in writer.pages:
-            writer.update_page_form_field_values(page, mappings)
+            writer.update_page_form_field_values(page, form_mappings)
 
         output = io.BytesIO()
         writer.write(output)
         output.seek(0)
 
+        # Then update editable annotation content using PyMuPDF, when available.
+        final_bytes = _apply_annotation_updates(output.getvalue(), mappings)
+        final_output = io.BytesIO(final_bytes)
+        final_output.seek(0)
+
         original_name = secure_filename(file.filename or 'filled_form.pdf')
         download_name = original_name.replace('.pdf', '_filled.pdf')
 
         return send_file(
-            output,
+            final_output,
             mimetype='application/pdf',
             as_attachment=True,
             download_name=download_name
