@@ -330,6 +330,56 @@ def _parse_form_mapping_text(mapping_text):
     return mappings
 
 
+def _field_is_read_only(field_dict):
+    """Return True when PDF field dictionary marks the field as read-only."""
+    try:
+        ff = int(field_dict.get('/Ff', 0) or 0)
+        return bool(ff & 1)
+    except Exception:
+        return False
+
+
+def _collect_editable_pdf_form_fields(reader):
+    """Collect editable form fields from AcroForm + page widget annotations."""
+    collected = {}
+
+    def _add_field(name, value):
+        key = str(name).strip()
+        if not key:
+            return
+        val = '' if value is None else str(value)
+        if key not in collected or (not collected[key] and val):
+            collected[key] = val
+
+    # Standard AcroForm fields
+    fields = reader.get_fields() or {}
+    for name, details in fields.items():
+        field_dict = details if isinstance(details, dict) else {}
+        if _field_is_read_only(field_dict):
+            continue
+        _add_field(name, field_dict.get('/V', ''))
+
+    # Editable widget annotations present on pages (can be missing from get_fields)
+    for page in reader.pages:
+        annots = page.get('/Annots') or []
+        for annot_ref in annots:
+            try:
+                annot = annot_ref.get_object()
+                if str(annot.get('/Subtype', '')) != '/Widget':
+                    continue
+                if _field_is_read_only(annot):
+                    continue
+
+                name = annot.get('/T')
+                if not name:
+                    continue
+                _add_field(name, annot.get('/V', ''))
+            except Exception:
+                continue
+
+    return [{'name': k, 'value': v} for k, v in collected.items()]
+
+
 def _bind_or_validate_browser_session(session_id):
     """Bind analyzer session ID to current browser session, or validate existing binding."""
     if not session_id:
@@ -1472,18 +1522,7 @@ def get_pdf_form_fields():
             return jsonify({'error': 'File must be a PDF'}), 400
 
         reader = PyPDF2.PdfReader(file.stream)
-        fields = reader.get_fields() or {}
-
-        form_fields = []
-        for name, details in fields.items():
-            value = ''
-            try:
-                if isinstance(details, dict):
-                    raw_val = details.get('/V', '')
-                    value = '' if raw_val is None else str(raw_val)
-            except Exception:
-                value = ''
-            form_fields.append({'name': str(name), 'value': value})
+        form_fields = _collect_editable_pdf_form_fields(reader)
 
         return jsonify({'success': True, 'fields': form_fields})
     except Exception as e:
@@ -1512,11 +1551,11 @@ def fill_pdf_form():
             return jsonify({'error': str(ve)}), 400
 
         reader = PyPDF2.PdfReader(file.stream)
-        fields = reader.get_fields() or {}
-        if not fields:
+        form_fields = _collect_editable_pdf_form_fields(reader)
+        if not form_fields:
             return jsonify({'error': 'No fillable form fields were found in this PDF'}), 400
 
-        field_names = list(fields.keys())
+        field_names = [f.get('name') for f in form_fields if f.get('name')]
         for required_name in field_names:
             if required_name not in mappings:
                 return jsonify({'error': f'Value is not defined for field "{required_name}"'}), 400
