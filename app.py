@@ -166,14 +166,14 @@ def _extract_context_for_file(pdf_info, requested_lang=None):
             with open(file_path, 'r', encoding='latin-1', errors='ignore') as f:
                 text_content = f.read()
         if text_content:
-            db_manager.cache_pdf_text(file_id, text_content, page_count=1)
+            db_manager.cache_pdf_text(file_id, text_content, pages=1)
         return text_content or ''
 
     # Keep AI analyzer extraction aligned with OCR Download Text route.
     best = extract_best_text_from_pdf(file_path, lang=requested_lang, dpi=300)
     text_content = best.get('text', '') or ''
     if text_content:
-        db_manager.cache_pdf_text(file_id, text_content, page_count=PDFTextExtractor._get_page_count(file_path))
+        db_manager.cache_pdf_text(file_id, text_content, pages=PDFTextExtractor._get_page_count(file_path))
         return text_content
 
     # Fallback to analyzer extractor when shared OCR pipeline returns empty text.
