@@ -314,6 +314,19 @@
         .status-msg.info { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
         .status-msg.error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
 
+                .summary-notes {
+                    display: none;
+                    margin: 0 28px 20px;
+                    padding: 14px 16px;
+                    border-radius: 8px;
+                    border: 1px solid rgba(232, 196, 104, 0.35);
+                    background: rgba(232, 196, 104, 0.08);
+                    font-size: 13px;
+                    color: #e9d7a8;
+                    line-height: 1.6;
+                }
+                .summary-notes.visible { display: block; }
+
         .spinner {
             width: 16px; height: 16px;
             border: 2px solid currentColor;
@@ -654,6 +667,7 @@
 
 <!-- Summary cards -->
 <div class="summary" id="summary"></div>
+<div class="summary-notes" id="summaryNotes"></div>
 
 <!-- Diff results -->
 <div class="results" id="results">
@@ -771,10 +785,32 @@ function renderResults(data) {
         </div>
         <div class="summary-card ${s.diff_pages.length > 0 ? 'err' : 'ok'}">
             <div class="val">${s.diff_pages.length}</div>
-            <div class="lbl">Pages with Diffs</div>
+            <div class="lbl">Pages with Diffs (First ${s.compared_diff_pages_limit || 5})</div>
         </div>
     `;
     sumEl.classList.add('visible');
+
+    // Summary notes: page-count first, repetition info, and comparison mode.
+    const notes = [];
+    if (s.page_count_note) notes.push(`• ${s.page_count_note}`);
+    if (s.stopped_early) {
+        notes.push(`• Diff scan stopped early after first ${s.compared_diff_pages_limit || 5} differing pages for performance.`);
+    }
+    if (typeof s.scanned_pages === 'number') {
+        notes.push(`• Pages scanned during detailed diff: ${s.scanned_pages}.`);
+    }
+    if (s.comparison_mode === 'text_and_image') {
+        notes.push('• Comparison includes both text and images. Image comparison is perceptual (resolution/compression-only changes are treated as same).');
+    }
+
+    const notesEl = document.getElementById('summaryNotes');
+    if (notes.length) {
+        notesEl.innerHTML = notes.join('<br>');
+        notesEl.classList.add('visible');
+    } else {
+        notesEl.classList.remove('visible');
+        notesEl.innerHTML = '';
+    }
 
     if (data.identical) return;
 

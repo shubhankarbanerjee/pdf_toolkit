@@ -12,6 +12,8 @@ perceptual hashing is used for images (not pixel-exact comparison).
 
 import io
 import difflib
+import hashlib
+from collections import Counter
 
 try:
     import fitz  # PyMuPDF
@@ -63,6 +65,7 @@ class PDFDiffer:
     # may differ before we call images "different".
     # 20/256 ≈ 92% similarity required.  Raise to allow more tolerance.
     IMAGE_THRESHOLD = 20
+    MAX_DIFF_PAGES = 5
 
     # ── Text extraction ──────────────────────────────────────
 
@@ -115,6 +118,91 @@ class PDFDiffer:
         except Exception as e:
             print(f"[WARNING] Image extraction failed: {e}")
             return []
+
+    @staticmethod
+    def _extract_images_for_page(doc, page_index):
+        """Return PIL images for one page from an opened PyMuPDF document."""
+        if not HAS_FITZ or not HAS_PIL or doc is None or page_index < 0 or page_index >= len(doc):
+            return []
+
+        page = doc.load_page(page_index)
+        page_imgs = []
+        for img_info in page.get_images(full=True):
+            try:
+                base = doc.extract_image(img_info[0])
+                img = Image.open(io.BytesIO(base['image'])).convert('RGB')
+                page_imgs.append(img)
+            except Exception:
+                pass
+        return page_imgs
+
+    @staticmethod
+    def _safe_page_count(pdf_path):
+        """Get page count without fully extracting all pages."""
+        if HAS_FITZ:
+            try:
+                doc = fitz.open(pdf_path)
+                count = len(doc)
+                doc.close()
+                return count
+            except Exception:
+                pass
+
+        if HAS_PYPDF2:
+            try:
+                with open(pdf_path, 'rb') as f:
+                    reader = PyPDF2.PdfReader(f)
+                    return len(reader.pages)
+            except Exception:
+                pass
+
+        return 0
+
+    @staticmethod
+    def _normalize_text(text):
+        """Normalize text for stable page-signature comparison."""
+        return ' '.join((text or '').split()).strip().lower()
+
+    @classmethod
+    def _page_signature(cls, text, images):
+        """Build a page signature from normalized text and perceptual image hashes."""
+        norm_text = cls._normalize_text(text)
+        text_hash = hashlib.sha256(norm_text.encode('utf-8')).hexdigest()
+
+        img_hashes = []
+        if HAS_PIL:
+            for img in images or []:
+                try:
+                    img_hashes.append(_phash(img))
+                except Exception:
+                    continue
+        img_hashes.sort()
+
+        return f"{text_hash}|{'|'.join(img_hashes)}"
+
+    @classmethod
+    def _build_page_signatures(cls, pdf_path):
+        """Build page signatures for repetition/new-content analysis."""
+        signatures = []
+
+        if HAS_FITZ:
+            try:
+                doc = fitz.open(pdf_path)
+                for i in range(len(doc)):
+                    page = doc.load_page(i)
+                    text = page.get_text() or ''
+                    images = cls._extract_images_for_page(doc, i)
+                    signatures.append(cls._page_signature(text, images))
+                doc.close()
+                return signatures
+            except Exception as e:
+                print(f"[WARNING] Signature extraction via PyMuPDF failed: {e}")
+
+        # Fallback: text-only signatures
+        text_pages = cls._extract_text_pages(pdf_path)
+        for text in text_pages:
+            signatures.append(cls._page_signature(text or '', []))
+        return signatures
 
     # ── Word-level text diff ──────────────────────────────────
 
@@ -199,56 +287,165 @@ class PDFDiffer:
                       chunks, has_image_diff, images_pdf1, images_pdf2, image_diffs}, ... ]
         }
         """
-        pages1 = cls._extract_text_pages(pdf1_path)
-        pages2 = cls._extract_text_pages(pdf2_path)
-        imgs1 = cls._extract_images_pages(pdf1_path)
-        imgs2 = cls._extract_images_pages(pdf2_path)
+        pages_pdf1 = cls._safe_page_count(pdf1_path)
+        pages_pdf2 = cls._safe_page_count(pdf2_path)
+        page_count_different = pages_pdf1 != pages_pdf2
 
-        n = max(len(pages1), len(pages2), 1)
+        # Analyze repeated pages / new content when page counts differ.
+        repetition_in_modified = 0
+        new_unique_pages_in_modified = 0
+        first_new_page_in_modified = None
+        if page_count_different:
+            try:
+                sigs1 = cls._build_page_signatures(pdf1_path)
+                sigs2 = cls._build_page_signatures(pdf2_path)
+                count1 = Counter(sigs1)
+                count2 = Counter(sigs2)
+
+                repetition_in_modified = sum(
+                    max(0, count2[sig] - count1.get(sig, 0))
+                    for sig in count2
+                    if sig in count1
+                )
+                new_unique_pages_in_modified = sum(1 for sig in count2 if sig not in count1)
+
+                sigs1_set = set(sigs1)
+                for idx, sig in enumerate(sigs2, 1):
+                    if sig not in sigs1_set:
+                        first_new_page_in_modified = idx
+                        break
+            except Exception as e:
+                print(f"[WARNING] Repetition/new-content analysis failed: {e}")
+
+        n = max(pages_pdf1, pages_pdf2, 1)
         page_results = []
         total_text_changes = 0
         total_image_changes = 0
         diff_pages = []
+        stopped_early = False
 
-        for i in range(n):
-            t1 = pages1[i] if i < len(pages1) else ''
-            t2 = pages2[i] if i < len(pages2) else ''
-            p1_imgs = imgs1[i] if i < len(imgs1) else []
-            p2_imgs = imgs2[i] if i < len(imgs2) else []
+        doc1 = None
+        doc2 = None
 
-            has_td, tc, chunks = cls._word_diff(t1, t2)
-            img_diffs = cls._compare_images(p1_imgs, p2_imgs)
-            has_id = any(d['status'] in ('different', 'added', 'removed') for d in img_diffs)
+        try:
+            if HAS_FITZ:
+                try:
+                    doc1 = fitz.open(pdf1_path)
+                except Exception as e:
+                    print(f"[WARNING] Unable to open PDF 1 with PyMuPDF: {e}")
+                    doc1 = None
+                try:
+                    doc2 = fitz.open(pdf2_path)
+                except Exception as e:
+                    print(f"[WARNING] Unable to open PDF 2 with PyMuPDF: {e}")
+                    doc2 = None
 
-            total_text_changes += tc
-            total_image_changes += sum(1 for d in img_diffs if d['status'] in ('different', 'added', 'removed'))
+            # Fallback readers if fitz is unavailable
+            pages1_fallback = None
+            pages2_fallback = None
+            imgs1_fallback = None
+            imgs2_fallback = None
+            if doc1 is None or doc2 is None:
+                pages1_fallback = cls._extract_text_pages(pdf1_path)
+                pages2_fallback = cls._extract_text_pages(pdf2_path)
+                imgs1_fallback = cls._extract_images_pages(pdf1_path)
+                imgs2_fallback = cls._extract_images_pages(pdf2_path)
 
-            page_num = i + 1
-            if has_td or has_id:
-                diff_pages.append(page_num)
+            for i in range(n):
+                if doc1 is not None:
+                    t1 = doc1.load_page(i).get_text() if i < len(doc1) else ''
+                    p1_imgs = cls._extract_images_for_page(doc1, i) if i < len(doc1) else []
+                else:
+                    t1 = pages1_fallback[i] if pages1_fallback is not None and i < len(pages1_fallback) else ''
+                    p1_imgs = imgs1_fallback[i] if imgs1_fallback is not None and i < len(imgs1_fallback) else []
 
-            page_results.append({
-                'page': page_num,
-                'in_pdf1': i < len(pages1),
-                'in_pdf2': i < len(pages2),
-                'has_text_diff': has_td,
-                'text_changes': tc,
-                'chunks': chunks,
-                'has_image_diff': has_id,
-                'images_pdf1': len(p1_imgs),
-                'images_pdf2': len(p2_imgs),
-                'image_diffs': img_diffs,
-            })
+                if doc2 is not None:
+                    t2 = doc2.load_page(i).get_text() if i < len(doc2) else ''
+                    p2_imgs = cls._extract_images_for_page(doc2, i) if i < len(doc2) else []
+                else:
+                    t2 = pages2_fallback[i] if pages2_fallback is not None and i < len(pages2_fallback) else ''
+                    p2_imgs = imgs2_fallback[i] if imgs2_fallback is not None and i < len(imgs2_fallback) else []
+
+                has_td, tc, chunks = cls._word_diff(t1, t2)
+                img_diffs = cls._compare_images(p1_imgs, p2_imgs)
+                has_id = any(d['status'] in ('different', 'added', 'removed') for d in img_diffs)
+
+                total_text_changes += tc
+                total_image_changes += sum(1 for d in img_diffs if d['status'] in ('different', 'added', 'removed'))
+
+                page_num = i + 1
+                if has_td or has_id:
+                    diff_pages.append(page_num)
+
+                page_results.append({
+                    'page': page_num,
+                    'in_pdf1': i < pages_pdf1,
+                    'in_pdf2': i < pages_pdf2,
+                    'has_text_diff': has_td,
+                    'text_changes': tc,
+                    'chunks': chunks,
+                    'has_image_diff': has_id,
+                    'images_pdf1': len(p1_imgs),
+                    'images_pdf2': len(p2_imgs),
+                    'image_diffs': img_diffs,
+                })
+
+                if len(diff_pages) >= cls.MAX_DIFF_PAGES:
+                    stopped_early = True
+                    break
+        finally:
+            try:
+                if doc1 is not None:
+                    doc1.close()
+            except Exception:
+                pass
+            try:
+                if doc2 is not None:
+                    doc2.close()
+            except Exception:
+                pass
+
+        if page_count_different and first_new_page_in_modified is not None:
+            page_count_note = (
+                f"Page counts differ ({pages_pdf1} vs {pages_pdf2}). "
+                f"First page in modified with data not present in original: page {first_new_page_in_modified}. "
+                f"Detected repeated-page occurrences in modified: {repetition_in_modified}."
+            )
+        elif page_count_different:
+            page_count_note = (
+                f"Page counts differ ({pages_pdf1} vs {pages_pdf2}). "
+                f"No uniquely new page content detected in modified; extra pages appear to be repetitions. "
+                f"Detected repeated-page occurrences in modified: {repetition_in_modified}."
+            )
+        else:
+            page_count_note = f"Page counts match ({pages_pdf1})."
+
+        identical = (
+            (not page_count_different)
+            and (total_text_changes == 0)
+            and (total_image_changes == 0)
+            and (not stopped_early)
+        )
 
         return {
             'success': True,
-            'identical': total_text_changes == 0 and total_image_changes == 0,
+            'identical': identical,
             'summary': {
-                'pages_pdf1': len(pages1),
-                'pages_pdf2': len(pages2),
+                'pages_pdf1': pages_pdf1,
+                'pages_pdf2': pages_pdf2,
                 'text_changes': total_text_changes,
                 'image_changes': total_image_changes,
                 'diff_pages': diff_pages,
+                'page_count_different': page_count_different,
+                'repetition_in_modified': repetition_in_modified,
+                'new_unique_pages_in_modified': new_unique_pages_in_modified,
+                'first_new_page_in_modified': first_new_page_in_modified,
+                'page_count_note': page_count_note,
+                'compared_diff_pages_limit': cls.MAX_DIFF_PAGES,
+                'stopped_early': stopped_early,
+                'scanned_pages': len(page_results),
+                'comparison_mode': 'text_and_image',
+                'image_resolution_agnostic': True,
             },
             'pages': page_results,
         }
