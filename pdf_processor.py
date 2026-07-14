@@ -36,13 +36,17 @@ except ImportError:
 
 try:
     from PIL import Image, ImageOps
+except ImportError:
+    print("Error: Pillow is required for image processing functions.")
+    print("Install it using: pip install pillow")
+    Image = None
+    ImageOps = None
+
+try:
     import pytesseract
 except ImportError:
-    print("Error: PIL and pytesseract are required for OCR functions.")
-    print("Install them using: pip install pillow pytesseract")
-    print("Also install Tesseract OCR from: https://github.com/UB-Mannheim/tesseract/wiki")
-    # We'll handle this gracefully - OCR functions will fail if not available
-    Image = None
+    print("Warning: pytesseract is not available. OCR functions will be disabled.")
+    print("Install it using: pip install pytesseract")
     pytesseract = None
 
 try:
@@ -77,7 +81,7 @@ def _configure_tesseract_binary():
 
 def _preprocess_image_for_ocr(img):
     """Improve OCR quality for scanned invoices/receipts."""
-    if Image is None:
+    if Image is None or ImageOps is None:
         return img
 
     gray = img.convert('L')
@@ -841,6 +845,10 @@ def pdf_to_images(input_pdf_path, output_format='png', from_page=1, to_page=None
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
+    if Image is None or ImageOps is None:
+        print("Error converting PDF to images: Pillow is not installed.")
+        return []
+
     try:
         doc = fitz.open(input_pdf_path)
         total_pages = len(doc)
@@ -890,7 +898,13 @@ def pdf_to_images(input_pdf_path, output_format='png', from_page=1, to_page=None
             if ext == 'gif':
                 background = background.convert('P', palette=Image.ADAPTIVE)
 
-            background.save(output_path, format=ext.upper(), **save_kwargs)
+            format_map = {
+                'jpg': 'JPEG',
+                'jpeg': 'JPEG',
+                'png': 'PNG',
+                'gif': 'GIF'
+            }
+            background.save(output_path, format=format_map.get(ext, 'PNG'), **save_kwargs)
             output_files.append(output_path)
 
         doc.close()
