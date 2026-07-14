@@ -556,12 +556,33 @@ class AIPDFAnalyzer:
         self.config_manager = AIConfigManager(config_path)
         self.config = self.config_manager.get_config()
         self._init_providers()
+
+    def apply_config(self, config: Optional[Dict[str, Any]] = None, persist: bool = False) -> Dict[str, Any]:
+        """Apply runtime configuration and reinitialize providers immediately."""
+        if config is None:
+            config = self.config_manager.get_config()
+        elif isinstance(config, dict):
+            merged_config = self.config_manager.get_config()
+            for provider, provider_cfg in config.items():
+                if isinstance(provider_cfg, dict) and isinstance(merged_config.get(provider), dict):
+                    merged_config[provider].update(provider_cfg)
+                elif isinstance(provider_cfg, dict):
+                    merged_config[provider] = provider_cfg
+            config = merged_config
+
+        self.config = config
+        if persist:
+            self.config_manager.save_config(config)
+        self._init_providers()
+        return self.config
     
     def _init_providers(self):
         """Initialize AI providers based on configuration."""
         self._claude_api_key = (self.config.get('claude', {}).get('api_key') or os.environ.get('CLAUDE_API_KEY', '')).strip()
         self._groq_api_key = (self.config.get('groq', {}).get('api_key') or os.environ.get('GROQ_API_KEY', '')).strip()
         self._github_api_key = (self.config.get('github', {}).get('api_key') or os.environ.get('GITHUB_MODELS_API_KEY', '')).strip()
+        self._gemini_api_key = (self.config.get('gemini', {}).get('api_key') or os.environ.get('GEMINI_API_KEY', '')).strip()
+        self._openai_api_key = (self.config.get('openai', {}).get('api_key') or os.environ.get('OPENAI_API_KEY', '')).strip()
 
         self.gemini_initialized = False
         self.openai_initialized = False
@@ -571,18 +592,20 @@ class AIPDFAnalyzer:
         self.ollama_available = False
         
         # Initialize Gemini
-        if HAS_GEMINI and self.config['gemini']['enabled'] and self.config['gemini']['api_key']:
+        gemini_enabled = bool(self.config.get('gemini', {}).get('enabled')) or bool(self._gemini_api_key)
+        if HAS_GEMINI and gemini_enabled and self._gemini_api_key:
             try:
-                genai.configure(api_key=self.config['gemini']['api_key'])
+                genai.configure(api_key=self._gemini_api_key)
                 self.gemini_initialized = True
                 print("[OK] Gemini initialized")
             except Exception as e:
                 print(f"[WARNING] Gemini init failed: {e}")
         
         # Initialize OpenAI
-        if HAS_OPENAI and self.config['openai']['enabled'] and self.config['openai']['api_key']:
+        openai_enabled = bool(self.config.get('openai', {}).get('enabled')) or bool(self._openai_api_key)
+        if HAS_OPENAI and openai_enabled and self._openai_api_key:
             try:
-                openai.api_key = self.config['openai']['api_key']
+                openai.api_key = self._openai_api_key
                 self.openai_initialized = True
                 print("[OK] OpenAI initialized")
             except Exception as e:
