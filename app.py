@@ -10,6 +10,7 @@ import uuid
 import copy
 import tempfile
 import traceback
+from datetime import timedelta
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory, session
 from werkzeug.utils import secure_filename
@@ -77,6 +78,8 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['OUTPUT_FOLDER'] = 'outputs'
+# Persist browser-session data (including AI config) on this device.
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=365)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 
 # Create necessary directories
@@ -1482,9 +1485,10 @@ def save_ai_config():
     
     try:
         config = request.get_json()
+        session.permanent = True
         session[SESSION_AI_CONFIG_KEY] = _sanitize_session_ai_config(config)
         session.modified = True
-        return jsonify({'success': True, 'scope': 'browser_session'})
+        return jsonify({'success': True, 'scope': 'device_cookie'})
     
     except Exception as e:
         traceback.print_exc()

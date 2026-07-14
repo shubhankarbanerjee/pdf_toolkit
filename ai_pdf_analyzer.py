@@ -11,6 +11,7 @@ Features: Session management, PDF caching, unlimited file sizes
 import json
 import io
 import os
+import time
 import hashlib
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -616,6 +617,36 @@ class AIPDFAnalyzer:
                 else:
                     # Auto-select best model
                     self.ollama_model = self._get_best_ollama_model()
+
+    @staticmethod
+    def _is_rate_limit_error(error_message: str) -> bool:
+        """Return True when error text indicates quota/rate limiting."""
+        msg = (error_message or '').lower()
+        markers = (
+            '429',
+            'too many requests',
+            'rate limit',
+            'rate-limited',
+            'quota exceeded',
+            'resource exhausted',
+        )
+        return any(marker in msg for marker in markers)
+
+    @staticmethod
+    def _fallback_order_after_groq() -> List[str]:
+        """Requested fallback chain when Groq is limited."""
+        return ['gemini', 'openai', 'ollama']
+
+    def _provider_ready(self, provider: str) -> bool:
+        """Check whether the provider is configured and available now."""
+        return {
+            'gemini': self.gemini_initialized,
+            'openai': self.openai_initialized,
+            'claude': self.claude_initialized,
+            'groq': self.groq_initialized,
+            'github': self.github_initialized,
+            'ollama': self.ollama_available,
+        }.get(provider, False)
     
     def _check_ollama_connection(self) -> bool:
         """Test Ollama connection. Returns True if reachable."""
@@ -901,25 +932,52 @@ class AIPDFAnalyzer:
         
         try:
             print(f"[DEBUG] analyze_pdf: provider={provider}, initialized_flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}, ollama={self.ollama_available}")
-            
-            if provider == 'gemini' and self.gemini_initialized:
-                return self._analyze_with_gemini(prompt, text, page_images)
-            elif provider == 'openai' and self.openai_initialized:
-                return self._analyze_with_openai(f"{prompt}\n\nFull document text:\n{text}", text)
-            elif provider == 'claude' and self.claude_initialized:
-                return self._analyze_with_claude(f"{prompt}\n\nFull document text:\n{text}", text)
-            elif provider == 'groq' and self.groq_initialized:
-                return self._analyze_with_groq(f"{prompt}\n\nFull document text:\n{text}", text)
-            elif provider == 'github' and self.github_initialized:
-                return self._analyze_with_github(f"{prompt}\n\nFull document text:\n{text}", text)
-            elif provider == 'ollama' and self.ollama_available:
-                return self._analyze_with_ollama(f"{prompt}\n\nFull document text:\n{text}", text)
-            else:
-                print(f"[ERROR] Provider {provider} not available or not initialized. Flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}, ollama={self.ollama_available}")
+
+            full_prompt = f"{prompt}\n\nFull document text:\n{text}"
+
+            def _run(selected_provider: str) -> Dict[str, Any]:
+                if selected_provider == 'gemini' and self.gemini_initialized:
+                    return self._analyze_with_gemini(prompt, text, page_images)
+                if selected_provider == 'openai' and self.openai_initialized:
+                    return self._analyze_with_openai(full_prompt, text)
+                if selected_provider == 'claude' and self.claude_initialized:
+                    return self._analyze_with_claude(full_prompt, text)
+                if selected_provider == 'groq' and self.groq_initialized:
+                    return self._analyze_with_groq(full_prompt, text)
+                if selected_provider == 'github' and self.github_initialized:
+                    return self._analyze_with_github(full_prompt, text)
+                if selected_provider == 'ollama' and self.ollama_available:
+                    return self._analyze_with_ollama(full_prompt, text)
                 return {
                     'success': False,
-                    'error': f'Provider {provider} not available'
+                    'error': f'Provider {selected_provider} not available'
                 }
+
+            result = _run(provider)
+            if result.get('success'):
+                return result
+
+            if provider == 'groq' and self._is_rate_limit_error(result.get('error', '')):
+                fallback_errors = [f"groq: {result.get('error', 'unknown error')}"]
+                for fallback_provider in self._fallback_order_after_groq():
+                    if not self._provider_ready(fallback_provider):
+                        fallback_errors.append(f"{fallback_provider}: not configured")
+                        continue
+
+                    fb_result = _run(fallback_provider)
+                    if fb_result.get('success'):
+                        fb_result['fallback_from'] = 'groq'
+                        return fb_result
+
+                    fallback_errors.append(f"{fallback_provider}: {fb_result.get('error', 'failed')}")
+
+                return {
+                    'success': False,
+                    'error': 'Groq rate-limited and all fallbacks failed',
+                    'details': fallback_errors,
+                }
+
+            return result
         except Exception as e:
             return {
                 'success': False,
@@ -995,31 +1053,55 @@ class AIPDFAnalyzer:
             if extra_headers:
                 headers.update(extra_headers)
 
-            response = requests.post(
-                url,
-                headers=headers,
-                json={
-                    'model': model,
-                    'messages': [
-                        {'role': 'system', 'content': system_prompt},
-                        {'role': 'user', 'content': prompt},
-                    ],
-                    'temperature': 0.7,
-                    'max_tokens': max_tokens,
-                },
-                timeout=120,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            summary = payload.get('choices', [{}])[0].get('message', {}).get('content', '')
-            if not summary:
-                raise ValueError(f'{provider_name} returned an empty response')
-            return {
-                'success': True,
-                'provider': provider_name,
-                'summary': summary,
-                'timestamp': datetime.now().isoformat()
-            }
+            max_attempts = 4
+            for attempt in range(1, max_attempts + 1):
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json={
+                        'model': model,
+                        'messages': [
+                            {'role': 'system', 'content': system_prompt},
+                            {'role': 'user', 'content': prompt},
+                        ],
+                        'temperature': 0.7,
+                        'max_tokens': max_tokens,
+                    },
+                    timeout=120,
+                )
+
+                if response.status_code == 429:
+                    if attempt < max_attempts:
+                        delay_s = 2 ** (attempt - 1)
+                        print(
+                            f"[WARNING] {provider_name} HTTP 429 (attempt {attempt}/{max_attempts}); "
+                            f"retrying in {delay_s}s"
+                        )
+                        time.sleep(delay_s)
+                        continue
+
+                    body = (response.text or '').strip()
+                    if len(body) > 280:
+                        body = body[:280] + '...'
+                    return {
+                        'success': False,
+                        'error': (
+                            f"{provider_name.title()} rate-limited after {max_attempts} attempts "
+                            f"(HTTP 429). {body}".strip()
+                        )
+                    }
+
+                response.raise_for_status()
+                payload = response.json()
+                summary = payload.get('choices', [{}])[0].get('message', {}).get('content', '')
+                if not summary:
+                    raise ValueError(f'{provider_name} returned an empty response')
+                return {
+                    'success': True,
+                    'provider': provider_name,
+                    'summary': summary,
+                    'timestamp': datetime.now().isoformat()
+                }
         except Exception as e:
             return {
                 'success': False,
@@ -1240,155 +1322,182 @@ Provide a clear, concise answer based on the document. If the answer is not in t
         
         try:
             print(f"[DEBUG] chat_with_context: About to check provider conditions. Provider={provider}, initialized_flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}")
-            
-            if provider == 'gemini' and self.gemini_initialized:
-                model = genai.GenerativeModel(self.config['gemini']['model'])
-                contents: List[Any] = [prompt]
-                if page_images:
-                    contents.extend(page_images)
-                response = model.generate_content(contents)
-                return {
-                    'success': True,
-                    'response': response.text,
-                    'provider': provider
-                }
-            elif provider == 'openai' and self.openai_initialized:
-                response = openai.ChatCompletion.create(
-                    model=self.config['openai']['model'],
-                    messages=[
-                        {"role": "system", "content": "You are a document assistant."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=1000
-                )
-                return {
-                    'success': True,
-                    'response': response.choices[0].message.content,
-                    'provider': provider
-                }
-            elif provider == 'claude' and self.claude_initialized:
-                result = self._analyze_with_claude(prompt, context_text)
-                if result.get('success'):
+
+            def _run(selected_provider: str) -> Dict[str, Any]:
+                if selected_provider == 'gemini' and self.gemini_initialized:
+                    model = genai.GenerativeModel(self.config['gemini']['model'])
+                    contents: List[Any] = [prompt]
+                    if page_images:
+                        contents.extend(page_images)
+                    response = model.generate_content(contents)
                     return {
                         'success': True,
-                        'response': result.get('summary', ''),
-                        'provider': provider
+                        'response': response.text,
+                        'provider': selected_provider
                     }
-                return result
-            elif provider == 'groq' and self.groq_initialized:
-                print(f"[DEBUG] chat_with_context: Calling _analyze_with_groq")
-                result = self._analyze_with_groq(prompt, context_text)
-                if result.get('success'):
+                if selected_provider == 'openai' and self.openai_initialized:
+                    response = openai.ChatCompletion.create(
+                        model=self.config['openai']['model'],
+                        messages=[
+                            {"role": "system", "content": "You are a document assistant."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.7,
+                        max_tokens=1000
+                    )
                     return {
                         'success': True,
-                        'response': result.get('summary', ''),
-                        'provider': provider
+                        'response': response.choices[0].message.content,
+                        'provider': selected_provider
                     }
-                return result
-            elif provider == 'github' and self.github_initialized:
-                result = self._analyze_with_github(prompt, context_text)
-                if result.get('success'):
-                    return {
-                        'success': True,
-                        'response': result.get('summary', ''),
-                        'provider': provider
-                    }
-                return result
-            elif provider == 'ollama':
+                if selected_provider == 'claude' and self.claude_initialized:
+                    result = self._analyze_with_claude(prompt, context_text)
+                    if result.get('success'):
+                        return {
+                            'success': True,
+                            'response': result.get('summary', ''),
+                            'provider': selected_provider
+                        }
+                    return result
+                if selected_provider == 'groq' and self.groq_initialized:
+                    print(f"[DEBUG] chat_with_context: Calling _analyze_with_groq")
+                    result = self._analyze_with_groq(prompt, context_text)
+                    if result.get('success'):
+                        return {
+                            'success': True,
+                            'response': result.get('summary', ''),
+                            'provider': selected_provider
+                        }
+                    return result
+                if selected_provider == 'github' and self.github_initialized:
+                    result = self._analyze_with_github(prompt, context_text)
+                    if result.get('success'):
+                        return {
+                            'success': True,
+                            'response': result.get('summary', ''),
+                            'provider': selected_provider
+                        }
+                    return result
+                if selected_provider == 'ollama':
                 # Use the auto-selected model with endpoint fallback
-                if not self.ollama_model:
-                    return {
-                        'success': False,
-                        'error': 'No Ollama models available - pull a model first'
-                    }
+                    if not self.ollama_model:
+                        return {
+                            'success': False,
+                            'error': 'No Ollama models available - pull a model first'
+                        }
                 
-                host = self.config['ollama']['host'].rstrip('/')
-                model = self.ollama_model
+                    host = self.config['ollama']['host'].rstrip('/')
+                    model = self.ollama_model
                 
-                print(f"[DEBUG] Chat: Starting Ollama analysis with model: {model} at {host}")
+                    print(f"[DEBUG] Chat: Starting Ollama analysis with model: {model} at {host}")
                 
-                try:
-                    # Try native Ollama endpoint first
                     try:
-                        url = f"{host}/api/generate"
-                        print(f"[DEBUG] Chat: Trying native Ollama endpoint: POST {url}")
+                    # Try native Ollama endpoint first
+                        try:
+                            url = f"{host}/api/generate"
+                            print(f"[DEBUG] Chat: Trying native Ollama endpoint: POST {url}")
+                            response = requests.post(
+                                url,
+                                json={
+                                    "model": model,
+                                    "prompt": prompt,
+                                    "stream": False
+                                },
+                                timeout=120
+                            )
+                        
+                            print(f"[DEBUG] Chat: Response status: {response.status_code}")
+                        
+                            if response.status_code == 200:
+                                result = response.json()
+                                print(f"[OK] Chat: Ollama analysis succeeded")
+                                return {
+                                    'success': True,
+                                    'response': result.get('response', ''),
+                                    'provider': selected_provider
+                                }
+                            else:
+                            # Any error (404, 405, 500, etc) - try Msty fallback
+                                error_body = response.text[:200] if response.text else ""
+                                print(f"[DEBUG] Chat: Native endpoint error HTTP {response.status_code}{f' - {error_body}' if error_body else ''}, trying Msty fallback...")
+                                pass
+                        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                            print(f"[DEBUG] Chat: Native endpoint connection error: {e}, trying Msty fallback...")
+                    
+                    # Fallback to Msty's OpenAI-compatible endpoint
+                        url_fallback = f"{host}/v1/chat/completions"
+                        print(f"[DEBUG] Chat: Trying Msty endpoint: POST {url_fallback}")
                         response = requests.post(
-                            url,
+                            url_fallback,
                             json={
                                 "model": model,
-                                "prompt": prompt,
-                                "stream": False
+                                "messages": [
+                                    {"role": "system", "content": "You are a document assistant."},
+                                    {"role": "user", "content": prompt}
+                                ],
+                                "temperature": 0.7,
+                                "max_tokens": 1000
                             },
                             timeout=120
                         )
-                        
-                        print(f"[DEBUG] Chat: Response status: {response.status_code}")
-                        
+                    
+                        print(f"[DEBUG] Chat: Msty response status: {response.status_code}")
+                    
                         if response.status_code == 200:
                             result = response.json()
-                            print(f"[OK] Chat: Ollama analysis succeeded")
+                            message_content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+                            print(f"[OK] Chat: Msty analysis succeeded")
                             return {
                                 'success': True,
-                                'response': result.get('response', ''),
-                                'provider': provider
+                                'response': message_content,
+                                'provider': f"{selected_provider} (Msty)"
                             }
                         else:
-                            # Any error (404, 405, 500, etc) - try Msty fallback
-                            error_body = response.text[:200] if response.text else ""
-                            print(f"[DEBUG] Chat: Native endpoint error HTTP {response.status_code}{f' - {error_body}' if error_body else ''}, trying Msty fallback...")
-                            pass
-                    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-                        print(f"[DEBUG] Chat: Native endpoint connection error: {e}, trying Msty fallback...")
-                    
-                    # Fallback to Msty's OpenAI-compatible endpoint
-                    url_fallback = f"{host}/v1/chat/completions"
-                    print(f"[DEBUG] Chat: Trying Msty endpoint: POST {url_fallback}")
-                    response = requests.post(
-                        url_fallback,
-                        json={
-                            "model": model,
-                            "messages": [
-                                {"role": "system", "content": "You are a document assistant."},
-                                {"role": "user", "content": prompt}
-                            ],
-                            "temperature": 0.7,
-                            "max_tokens": 1000
-                        },
-                        timeout=120
-                    )
-                    
-                    print(f"[DEBUG] Chat: Msty response status: {response.status_code}")
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        message_content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
-                        print(f"[OK] Chat: Msty analysis succeeded")
-                        return {
-                            'success': True,
-                            'response': message_content,
-                            'provider': f"{provider} (Msty)"
-                        }
-                    else:
-                        error_body = response.text[:500] if response.text else "No response body"
-                        print(f"[ERROR] Chat: Msty endpoint returned HTTP {response.status_code}")
+                            error_body = response.text[:500] if response.text else "No response body"
+                            print(f"[ERROR] Chat: Msty endpoint returned HTTP {response.status_code}")
+                            return {
+                                'success': False,
+                                'error': f'Ollama request failed: HTTP {response.status_code}'
+                            }
+                    except Exception as e:
+                        error_msg = str(e)
+                        print(f"[ERROR] Chat: Unexpected exception in Ollama: {error_msg}")
                         return {
                             'success': False,
-                            'error': f'Ollama request failed: HTTP {response.status_code}'
+                            'error': f'Ollama analysis failed: {error_msg}'
                         }
-                except Exception as e:
-                    error_msg = str(e)
-                    print(f"[ERROR] Chat: Unexpected exception in Ollama: {error_msg}")
-                    return {
-                        'success': False,
-                        'error': f'Ollama analysis failed: {error_msg}'
-                    }
-            else:
-                print(f"[ERROR] chat_with_context: Provider {provider} not available or not initialized. Flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}, ollama={self.ollama_available}")
+
+                print(f"[ERROR] chat_with_context: Provider {selected_provider} not available or not initialized. Flags: gemini={self.gemini_initialized}, openai={self.openai_initialized}, claude={self.claude_initialized}, groq={self.groq_initialized}, github={self.github_initialized}, ollama={self.ollama_available}")
                 return {
                     'success': False,
-                    'error': f'Provider {provider} not available'
+                    'error': f'Provider {selected_provider} not available'
                 }
+
+            result = _run(provider)
+            if result.get('success'):
+                return result
+
+            if provider == 'groq' and self._is_rate_limit_error(result.get('error', '')):
+                fallback_errors = [f"groq: {result.get('error', 'unknown error')}"]
+                for fallback_provider in self._fallback_order_after_groq():
+                    if not self._provider_ready(fallback_provider):
+                        fallback_errors.append(f"{fallback_provider}: not configured")
+                        continue
+
+                    fb_result = _run(fallback_provider)
+                    if fb_result.get('success'):
+                        fb_result['fallback_from'] = 'groq'
+                        return fb_result
+
+                    fallback_errors.append(f"{fallback_provider}: {fb_result.get('error', 'failed')}")
+
+                return {
+                    'success': False,
+                    'error': 'Groq rate-limited and all fallbacks failed',
+                    'details': fallback_errors,
+                }
+
+            return result
         except Exception as e:
             return {
                 'success': False,
