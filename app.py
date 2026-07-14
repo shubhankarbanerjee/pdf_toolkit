@@ -524,8 +524,14 @@ def api_split():
         if not allowed_file(file.filename):
             return jsonify({'error': 'File must be a PDF'}), 400
         
-        max_size = request.form.get('max_size', '200')
-        max_size = int(max_size)
+        max_size = request.form.get('max_size', '200').strip()
+        try:
+            max_size = float(max_size)
+        except ValueError:
+            return jsonify({'error': 'Max size must be a numeric value in MB'}), 400
+
+        if max_size <= 0:
+            return jsonify({'error': 'Max size must be greater than 0 MB'}), 400
         
         # Save uploaded file
         unique_id = str(uuid.uuid4())

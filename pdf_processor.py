@@ -7,6 +7,7 @@ import os
 import io
 import sys
 import re
+import math
 import shutil
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -323,15 +324,24 @@ def merge_pdfs(pdf_path1, pdf_path2):
 def split_pdf_by_size(input_pdf_path, max_size_mb=200):
     """
     Split a PDF file into multiple PDFs based on maximum file size.
+    When splitting is required, parts are chosen to be near-even in size.
     
     Args:
         input_pdf_path (str): Path to the input PDF file
-        max_size_mb (int): Maximum size of each split part in MB (default: 200)
+        max_size_mb (float): Maximum size of each split part in MB (default: 200)
     
     Returns:
         list: List of output file paths created
     """
-    max_size_bytes = (max_size_mb - 1) * 1024 * 1024  # 199 MB in bytes
+    try:
+        max_size_mb = float(max_size_mb)
+    except (TypeError, ValueError):
+        raise ValueError("Maximum size must be a numeric value in MB")
+
+    if max_size_mb <= 0:
+        raise ValueError("Maximum size must be greater than 0 MB")
+
+    max_size_bytes = int(max_size_mb * 1024 * 1024)
     
     if not os.path.exists(input_pdf_path):
         return []
@@ -356,47 +366,75 @@ def split_pdf_by_size(input_pdf_path, max_size_mb=200):
     if not os.path.exists('outputs'):
         os.makedirs('outputs')
     
+    def _serialized_range_size(start_idx, end_idx, cache):
+        """Get serialized size (bytes) for page range [start_idx, end_idx)."""
+        key = (start_idx, end_idx)
+        if key in cache:
+            return cache[key]
+
+        writer_test = PdfWriter()
+        for i in range(start_idx, end_idx):
+            writer_test.add_page(reader.pages[i])
+
+        buffer = io.BytesIO()
+        writer_test.write(buffer)
+        size = buffer.tell()
+        buffer.close()
+        cache[key] = size
+        return size
+
+    # Page-size estimates are used only for balancing, not threshold validation.
+    page_estimates = []
+    size_cache = {}
+    for page_idx in range(total_pages):
+        page_estimates.append(_serialized_range_size(page_idx, page_idx + 1, size_cache))
+
+    estimated_total = sum(page_estimates)
+    target_parts = max(1, math.ceil(max(1, input_size) / max_size_bytes))
+
     output_files = []
     current_part = 1
     current_page_start = 0
-    
+
     while current_page_start < total_pages:
-        writer = PdfWriter()
-        current_size = 0
-        pages_in_part = 0
-        current_page_end = current_page_start
-        
-        # Add pages until we reach the size limit
-        for page_idx in range(current_page_start, total_pages):
-            # Estimate page size
-            writer_test = PdfWriter()
-            writer_test.add_page(reader.pages[page_idx])
-            buffer = io.BytesIO()
-            writer_test.write(buffer)
-            page_size = buffer.tell()
-            buffer.close()
-            
-            if current_size + page_size > max_size_bytes and pages_in_part > 0:
+        remaining_pages = total_pages - current_page_start
+        remaining_parts = max(1, target_parts - len(output_files))
+
+        # Aim for near-even sizes while respecting max_size_bytes.
+        desired_size = min(max_size_bytes, max(1, int(estimated_total / remaining_parts)))
+        min_end = current_page_start + 1
+        max_end = total_pages - (remaining_parts - 1)
+
+        best_end = None
+        best_gap = None
+
+        for end_idx in range(min_end, max_end + 1):
+            candidate_size = _serialized_range_size(current_page_start, end_idx, size_cache)
+            if candidate_size > max_size_bytes:
                 break
-            
-            writer.add_page(reader.pages[page_idx])
-            current_size += page_size
-            pages_in_part += 1
-            current_page_end = page_idx + 1
-        
-        if pages_in_part == 0 and current_page_start < total_pages:
-            writer.add_page(reader.pages[current_page_start])
-            pages_in_part = 1
-            current_page_end = current_page_start + 1
-        
+
+            gap = abs(candidate_size - desired_size)
+            if best_gap is None or gap < best_gap:
+                best_gap = gap
+                best_end = end_idx
+
+        # If no candidate fits, emit one page to avoid stalling on oversized pages.
+        if best_end is None:
+            best_end = current_page_start + 1
+
+        writer = PdfWriter()
+        for i in range(current_page_start, best_end):
+            writer.add_page(reader.pages[i])
+
         output_filename = f"{stem}_part{current_part}.pdf"
         output_path = os.path.join('outputs', output_filename)
-        
+
         with open(output_path, 'wb') as output_file:
             writer.write(output_file)
-        
+
         output_files.append(output_path)
-        current_page_start = current_page_end
+        estimated_total -= sum(page_estimates[current_page_start:best_end])
+        current_page_start = best_end
         current_part += 1
     
     return output_files
