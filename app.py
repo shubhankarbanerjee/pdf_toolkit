@@ -245,8 +245,7 @@ def _create_session_ai_analyzer():
         return None
 
     runtime_analyzer = AIPDFAnalyzer()
-    runtime_analyzer.config = _build_effective_ai_config()
-    runtime_analyzer._init_providers()
+    runtime_analyzer.apply_config(_build_effective_ai_config())
     return runtime_analyzer
 
 
@@ -1485,9 +1484,14 @@ def save_ai_config():
     
     try:
         config = request.get_json()
+        sanitized = _sanitize_session_ai_config(config)
         session.permanent = True
-        session[SESSION_AI_CONFIG_KEY] = _sanitize_session_ai_config(config)
+        session[SESSION_AI_CONFIG_KEY] = sanitized
         session.modified = True
+
+        if ai_analyzer:
+            ai_analyzer.apply_config(_build_effective_ai_config())
+
         return jsonify({'success': True, 'scope': 'device_cookie'})
     
     except Exception as e:
