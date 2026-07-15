@@ -34,17 +34,8 @@ def open_browser(url, delay=2):
     webbrowser.open(url)
 
 
-def start_cloudflare_tunnel(port):
-    """Start a Cloudflare quick tunnel for public internet access."""
-    if shutil.which('cloudflared') is None:
-        print('[WARNING] cloudflared not found in PATH. Skipping Cloudflare tunnel.')
-        print('          Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/')
-        return None, None
-
-    tunnel_cmd = [
-        'cloudflared', 'tunnel', '--url', f'http://localhost:{port}', '--no-autoupdate'
-    ]
-
+def _start_cloudflared_process(tunnel_cmd):
+    """Start cloudflared process and return the process handle."""
     try:
         process = subprocess.Popen(
             tunnel_cmd,
@@ -55,6 +46,23 @@ def start_cloudflare_tunnel(port):
         )
     except Exception as e:
         print(f'[WARNING] Failed to start Cloudflare tunnel: {e}')
+        return None
+    return process
+
+
+def start_cloudflare_quick_tunnel(port):
+    """Start a Cloudflare quick tunnel for public internet access."""
+    if shutil.which('cloudflared') is None:
+        print('[WARNING] cloudflared not found in PATH. Skipping Cloudflare tunnel.')
+        print('          Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/')
+        return None, None
+
+    tunnel_cmd = [
+        'cloudflared', 'tunnel', '--url', f'http://localhost:{port}', '--no-autoupdate'
+    ]
+
+    process = _start_cloudflared_process(tunnel_cmd)
+    if process is None:
         return None, None
 
     tunnel_url = None
@@ -77,6 +85,68 @@ def start_cloudflare_tunnel(port):
         print('[WARNING] Cloudflare tunnel started, but public URL not detected yet. Check cloudflared logs above.')
 
     return process, tunnel_url
+
+
+def start_cloudflare_named_tunnel(port, tunnel_name, hostname=None, token=None, config_file=None, credentials_file=None):
+    """Start a Cloudflare named tunnel (static URL via configured hostname)."""
+    if shutil.which('cloudflared') is None:
+        print('[WARNING] cloudflared not found in PATH. Skipping Cloudflare tunnel.')
+        print('          Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/')
+        return None, None
+
+    if not token and not tunnel_name:
+        print('[WARNING] Named tunnel mode requires PDF_TOOLKIT_CF_TUNNEL_NAME or PDF_TOOLKIT_CF_TUNNEL_TOKEN.')
+        return None, None
+
+    tunnel_cmd = ['cloudflared', 'tunnel', '--no-autoupdate']
+
+    if config_file:
+        tunnel_cmd.extend(['--config', config_file])
+    if credentials_file:
+        tunnel_cmd.extend(['--credentials-file', credentials_file])
+
+    if token:
+        tunnel_cmd.extend(['run', '--token', token])
+    else:
+        tunnel_cmd.extend(['run', tunnel_name])
+
+    process = _start_cloudflared_process(tunnel_cmd)
+    if process is None:
+        return None, None
+
+    start_time = time.time()
+    while time.time() - start_time < 12:
+        line = process.stdout.readline() if process.stdout else ''
+        if not line:
+            if process.poll() is not None:
+                break
+            continue
+        print(f'[Cloudflare] {line.strip()}')
+
+    public_url = None
+    if hostname:
+        public_url = f'https://{hostname}'
+        print(f'[OK] Cloudflare named tunnel ready: {public_url}')
+    else:
+        print('[OK] Cloudflare named tunnel started. Static URL is the hostname configured in Cloudflare Zero Trust.')
+        print(f'     Local service expected on: http://localhost:{port}')
+
+    return process, public_url
+
+
+def start_cloudflare_tunnel(port, mode='quick', tunnel_name=None, hostname=None, token=None, config_file=None, credentials_file=None):
+    """Start Cloudflare tunnel in quick or named mode."""
+    mode_normalized = (mode or 'quick').strip().lower()
+    if mode_normalized == 'named':
+        return start_cloudflare_named_tunnel(
+            port=port,
+            tunnel_name=tunnel_name,
+            hostname=hostname,
+            token=token,
+            config_file=config_file,
+            credentials_file=credentials_file,
+        )
+    return start_cloudflare_quick_tunnel(port)
 
 def main():
     """Main function to start the PDF Toolkit application."""
@@ -105,6 +175,12 @@ def main():
     host = os.environ.get('PDF_TOOLKIT_HOST', '0.0.0.0')
     debug = os.environ.get('PDF_TOOLKIT_DEBUG', 'false').lower() == 'true'
     enable_tunnel = os.environ.get('PDF_TOOLKIT_ENABLE_TUNNEL', 'true').lower() in ('1', 'true', 'yes', 'on')
+    tunnel_mode = os.environ.get('PDF_TOOLKIT_TUNNEL_MODE', 'quick')
+    cf_tunnel_name = os.environ.get('PDF_TOOLKIT_CF_TUNNEL_NAME', '').strip()
+    cf_tunnel_hostname = os.environ.get('PDF_TOOLKIT_CF_TUNNEL_HOSTNAME', '').strip()
+    cf_tunnel_token = os.environ.get('PDF_TOOLKIT_CF_TUNNEL_TOKEN', '').strip()
+    cf_config_file = os.environ.get('PDF_TOOLKIT_CF_CONFIG', '').strip()
+    cf_credentials_file = os.environ.get('PDF_TOOLKIT_CF_CREDENTIALS', '').strip()
     
     # Get local network info
     local_ip = get_local_ip()
@@ -114,6 +190,7 @@ def main():
     print(f"  Host: {host}")
     print(f"  Debug: {debug}")
     print(f"  Cloudflare Tunnel: {enable_tunnel}")
+    print(f"  Cloudflare Mode: {tunnel_mode}")
     print()
     print("Access URLs:")
     print(f"  Local:   http://localhost:{port}")
@@ -140,7 +217,15 @@ def main():
     tunnel_process = None
     tunnel_url = None
     if enable_tunnel:
-        tunnel_process, tunnel_url = start_cloudflare_tunnel(port)
+        tunnel_process, tunnel_url = start_cloudflare_tunnel(
+            port=port,
+            mode=tunnel_mode,
+            tunnel_name=cf_tunnel_name,
+            hostname=cf_tunnel_hostname,
+            token=cf_tunnel_token,
+            config_file=cf_config_file,
+            credentials_file=cf_credentials_file,
+        )
         if tunnel_url:
             print(f"  Public:  {tunnel_url}")
             print()
